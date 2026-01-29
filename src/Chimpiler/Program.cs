@@ -47,14 +47,6 @@ class Program
         };
         outputOption.AddAlias("-o");
 
-        var frameworkOption = new Option<string?>(
-            name: "--framework",
-            description: "Target framework hint for multi-targeted assemblies")
-        {
-            IsRequired = false
-        };
-        frameworkOption.AddAlias("-f");
-
         var verboseOption = new Option<bool>(
             name: "--verbose",
             description: "Enable detailed logging",
@@ -67,11 +59,10 @@ class Program
         efMigrateCommand.AddOption(assemblyOption);
         efMigrateCommand.AddOption(contextOption);
         efMigrateCommand.AddOption(outputOption);
-        efMigrateCommand.AddOption(frameworkOption);
         efMigrateCommand.AddOption(verboseOption);
 
         efMigrateCommand.SetHandler(
-            (string assembly, string? context, string output, string? framework, bool verbose) =>
+            (string assembly, string? context, string output, bool verbose) =>
             {
                 try
                 {
@@ -80,7 +71,6 @@ class Program
                         AssemblyPath = assembly,
                         ContextTypeName = context,
                         OutputDirectory = output,
-                        Framework = framework,
                         Verbose = verbose
                     };
 
@@ -100,7 +90,6 @@ class Program
             assemblyOption,
             contextOption,
             outputOption,
-            frameworkOption,
             verboseOption);
 
         return efMigrateCommand;

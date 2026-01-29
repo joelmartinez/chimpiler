@@ -7,21 +7,22 @@ public static class DacpacNaming
 {
     /// <summary>
     /// Generates a DACPAC filename from a DbContext type name
-    /// Strips the "Context" suffix if present and appends ".dacpac"
+    /// Strips the "DbContext" or "Context" suffix if present and appends ".dacpac"
+    /// Checks for "DbContext" first to handle edge cases correctly
     /// </summary>
     public static string GetDacpacFileName(Type dbContextType)
     {
         var typeName = dbContextType.Name;
         
-        // Strip "Context" suffix if present
-        if (typeName.EndsWith("Context", StringComparison.OrdinalIgnoreCase))
-        {
-            typeName = typeName.Substring(0, typeName.Length - "Context".Length);
-        }
-        // Also strip "DbContext" suffix if present
-        else if (typeName.EndsWith("DbContext", StringComparison.OrdinalIgnoreCase))
+        // Strip "DbContext" suffix first (longest suffix first)
+        if (typeName.EndsWith("DbContext", StringComparison.OrdinalIgnoreCase))
         {
             typeName = typeName.Substring(0, typeName.Length - "DbContext".Length);
+        }
+        // Then check for "Context" suffix
+        else if (typeName.EndsWith("Context", StringComparison.OrdinalIgnoreCase))
+        {
+            typeName = typeName.Substring(0, typeName.Length - "Context".Length);
         }
 
         return $"{typeName}.dacpac";

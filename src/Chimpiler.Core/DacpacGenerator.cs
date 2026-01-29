@@ -25,24 +25,24 @@ public class DacpacGenerator
     {
         Log($"Generating DACPAC for {dbContextType.Name}...");
 
-        // Create an instance of the DbContext
-        var context = CreateDbContext(dbContextType);
-
-        // Get the model
-        var model = context.Model;
-
         // Get the database name
         var databaseName = DacpacNaming.GetDatabaseName(dbContextType);
 
         // Create a TSqlModel
-        var sqlModel = new TSqlModel(SqlServerVersion.Sql160, new TSqlModelOptions
+        using var sqlModel = new TSqlModel(SqlServerVersion.Sql160, new TSqlModelOptions
         {
             // Use case-insensitive collation by default
             Collation = "SQL_Latin1_General_CP1_CI_AS"
         });
 
-        // Generate schema objects from the EF Core model
-        GenerateSchemaObjects(sqlModel, model, databaseName);
+        // Create and use the DbContext to get the model
+        using (var context = CreateDbContext(dbContextType))
+        {
+            var model = context.Model;
+
+            // Generate schema objects from the EF Core model
+            GenerateSchemaObjects(sqlModel, model, databaseName);
+        }
 
         // Save the DACPAC
         Log($"Writing DACPAC to {outputPath}...");
@@ -148,7 +148,8 @@ public class DacpacGenerator
         if (primaryKey != null)
         {
             var keyColumns = string.Join(", ", primaryKey.Properties.Select(p => $"[{p.GetColumnName()}]"));
-            sb.AppendLine($"    CONSTRAINT [PK_{tableName}] PRIMARY KEY ({keyColumns})");
+            // Include schema in constraint name to avoid collisions
+            sb.AppendLine($"    CONSTRAINT [PK_{schema}_{tableName}] PRIMARY KEY ({keyColumns})");
         }
 
         sb.AppendLine(")");
@@ -194,7 +195,7 @@ public class DacpacGenerator
                 continue;
             }
 
-            var indexName = index.GetDatabaseName() ?? $"IX_{tableName}_{string.Join("_", index.Properties.Select(p => p.Name))}";
+            var indexName = index.GetDatabaseName() ?? $"IX_{schema}_{tableName}_{string.Join("_", index.Properties.Select(p => p.Name))}";
             var columns = string.Join(", ", index.Properties.Select(p => $"[{p.GetColumnName()}]"));
             var unique = index.IsUnique ? "UNIQUE " : "";
 
@@ -214,7 +215,7 @@ public class DacpacGenerator
             var principalSchema = foreignKey.PrincipalEntityType.GetSchema() ?? "dbo";
 
             var fkName = foreignKey.GetConstraintName() ?? 
-                        $"FK_{tableName}_{principalTable}_{string.Join("_", foreignKey.Properties.Select(p => p.Name))}";
+                        $"FK_{schema}_{tableName}_{principalSchema}_{principalTable}_{string.Join("_", foreignKey.Properties.Select(p => p.Name))}";
 
             var fkColumns = string.Join(", ", foreignKey.Properties.Select(p => $"[{p.GetColumnName()}]"));
             var pkColumns = string.Join(", ", foreignKey.PrincipalKey.Properties.Select(p => $"[{p.GetColumnName()}]"));

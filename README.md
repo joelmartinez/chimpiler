@@ -98,7 +98,7 @@ DACPAC files are named based on the DbContext type name with the following rules
 | DbContext Type | DACPAC Filename |
 |----------------|-----------------|
 | `TheDatabaseContext` | `TheDatabase.dacpac` |
-| `OrdersDbContext` | `OrdersDb.dacpac` |
+| `OrdersDbContext` | `Orders.dacpac` |
 | `ReportingContext` | `Reporting.dacpac` |
 | `InventoryContext` | `Inventory.dacpac` |
 

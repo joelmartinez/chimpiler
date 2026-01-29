@@ -10,7 +10,7 @@ public class DacpacNamingTests
 {
     [Theory]
     [InlineData(typeof(TheDatabaseContext), "TheDatabase.dacpac")]
-    [InlineData(typeof(OrdersDbContext), "OrdersDb.dacpac")]
+    [InlineData(typeof(OrdersDbContext), "Orders.dacpac")]
     [InlineData(typeof(ReportingContext), "Reporting.dacpac")]
     [InlineData(typeof(InventoryContext), "Inventory.dacpac")]
     public void GetDacpacFileName_ShouldStripContextSuffix(Type dbContextType, string expectedFileName)
@@ -24,7 +24,7 @@ public class DacpacNamingTests
 
     [Theory]
     [InlineData(typeof(TheDatabaseContext), "TheDatabase")]
-    [InlineData(typeof(OrdersDbContext), "OrdersDb")]
+    [InlineData(typeof(OrdersDbContext), "Orders")]
     [InlineData(typeof(ReportingContext), "Reporting")]
     [InlineData(typeof(InventoryContext), "Inventory")]
     public void GetDatabaseName_ShouldReturnNameWithoutExtension(Type dbContextType, string expectedName)
@@ -156,7 +156,7 @@ public class DacpacGeneratorTests : IDisposable
     {
         // Arrange
         var generator = new DacpacGenerator();
-        var outputPath = Path.Combine(_tempOutputDir, "OrdersDb.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Orders.dacpac");
 
         // Act
         generator.GenerateDacpac(typeof(OrdersDbContext), outputPath);
@@ -272,7 +272,7 @@ public class EfMigrateServiceTests : IDisposable
         
         // Should have at least the test contexts
         Assert.Contains(dacpacFiles, f => Path.GetFileName(f) == "TheDatabase.dacpac");
-        Assert.Contains(dacpacFiles, f => Path.GetFileName(f) == "OrdersDb.dacpac");
+        Assert.Contains(dacpacFiles, f => Path.GetFileName(f) == "Orders.dacpac");
         Assert.Contains(dacpacFiles, f => Path.GetFileName(f) == "Reporting.dacpac");
         Assert.Contains(dacpacFiles, f => Path.GetFileName(f) == "Inventory.dacpac");
     }

@@ -13,6 +13,8 @@ public class TheDatabaseContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            // Note: This connection string is a placeholder and is not used during DACPAC generation
+            // DACPAC generation only requires the EF Core model, not a live database connection
             optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=TestDb;Trusted_Connection=True;");
         }
     }
@@ -48,6 +50,7 @@ public class OrdersDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            // Note: This connection string is a placeholder and is not used during DACPAC generation
             optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=OrdersDb;Trusted_Connection=True;");
         }
     }
@@ -124,6 +127,7 @@ public class ReportingContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            // Note: This connection string is a placeholder and is not used during DACPAC generation
             optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ReportingDb;Trusted_Connection=True;");
         }
     }
@@ -178,6 +182,7 @@ public class InventoryContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            // Note: This connection string is a placeholder and is not used during DACPAC generation
             optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=InventoryDb;Trusted_Connection=True;");
         }
     }

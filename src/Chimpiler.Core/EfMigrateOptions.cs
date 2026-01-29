@@ -22,11 +22,6 @@ public class EfMigrateOptions
     public string OutputDirectory { get; set; } = "./output";
 
     /// <summary>
-    /// Optional target framework hint for multi-targeted assemblies
-    /// </summary>
-    public string? Framework { get; set; }
-
-    /// <summary>
     /// Enable verbose logging
     /// </summary>
     public bool Verbose { get; set; }
