@@ -1,10 +1,10 @@
 # Chimpiler
 
-A multi-purpose database and schema tooling ecosystem for .NET.
+A multi-purpose CLI tooling ecosystem for .NET.
 
 ## Overview
 
-Chimpiler is an extensible CLI framework designed to provide pragmatic database and schema tooling for modern .NET applications. While designed to grow over time, the initial release focuses on the `ef-migrate` subcommand — a tool that generates **DACPAC files** directly from Entity Framework Core DbContext models.
+Chimpiler is an extensible CLI framework designed to provide pragmatic tooling for modern .NET applications. While designed to grow over time, the initial release focuses on the `ef-migrate` subcommand — a tool that generates **DACPAC files** directly from Entity Framework Core DbContext models.
 
 ## Features
 

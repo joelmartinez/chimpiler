@@ -8,6 +8,10 @@
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\docs\cli\ef-migrate.md" Link="Resources\ef-migrate.md" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -18,7 +22,7 @@
     <PackageId>Chimpiler</PackageId>
     <Version>0.1.0</Version>
     <Authors>Joel Martinez</Authors>
-    <Description>A multi-purpose database and schema tooling ecosystem for .NET</Description>
+    <Description>A multi-purpose CLI tooling ecosystem for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/joelmartinez/chimpiler</RepositoryUrl>
   </PropertyGroup>

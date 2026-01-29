@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Reflection;
 using Chimpiler.Core;
 
 namespace Chimpiler;
@@ -7,13 +8,93 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
-        var rootCommand = new RootCommand("Chimpiler - A multi-purpose database and schema tooling ecosystem");
+        var rootCommand = new RootCommand("Chimpiler - A multi-purpose CLI tooling ecosystem");
 
         // Create the ef-migrate command
         var efMigrateCommand = CreateEfMigrateCommand();
         rootCommand.AddCommand(efMigrateCommand);
 
+        // Create the help command
+        var helpCommand = CreateHelpCommand(rootCommand);
+        rootCommand.AddCommand(helpCommand);
+
         return await rootCommand.InvokeAsync(args);
+    }
+
+    static Command CreateHelpCommand(RootCommand rootCommand)
+    {
+        var helpCommand = new Command("help", "Display help information for Chimpiler or a specific subcommand");
+        
+        var subcommandArg = new Argument<string?>(
+            name: "subcommand",
+            description: "The subcommand to get help for",
+            getDefaultValue: () => null);
+        
+        helpCommand.AddArgument(subcommandArg);
+
+        helpCommand.SetHandler((string? subcommand) =>
+        {
+            if (string.IsNullOrEmpty(subcommand))
+            {
+                // Show general help
+                ShowGeneralHelp();
+            }
+            else
+            {
+                // Show subcommand-specific help
+                ShowSubcommandHelp(subcommand);
+            }
+        }, subcommandArg);
+
+        return helpCommand;
+    }
+
+    static void ShowGeneralHelp()
+    {
+        Console.WriteLine("Chimpiler - A multi-purpose CLI tooling ecosystem");
+        Console.WriteLine();
+        Console.WriteLine("Usage:");
+        Console.WriteLine("  chimpiler [command] [options]");
+        Console.WriteLine();
+        Console.WriteLine("Available Commands:");
+        Console.WriteLine("  ef-migrate    Generate DACPACs from EF Core DbContext models");
+        Console.WriteLine("  help          Display help information for Chimpiler or a specific subcommand");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("  -?, -h, --help    Show help and usage information");
+        Console.WriteLine("  --version         Show version information");
+        Console.WriteLine();
+        Console.WriteLine("Use 'chimpiler help [command]' for more information about a command.");
+    }
+
+    static void ShowSubcommandHelp(string subcommand)
+    {
+        if (subcommand.Equals("ef-migrate", StringComparison.OrdinalIgnoreCase))
+        {
+            var helpText = LoadEmbeddedMarkdown("ef-migrate.md");
+            Console.WriteLine(helpText);
+        }
+        else
+        {
+            Console.WriteLine($"Unknown subcommand: {subcommand}");
+            Console.WriteLine();
+            ShowGeneralHelp();
+        }
+    }
+
+    static string LoadEmbeddedMarkdown(string resourceName)
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourcePath = $"Chimpiler.Resources.{resourceName}";
+        
+        using var stream = assembly.GetManifestResourceStream(resourcePath);
+        if (stream == null)
+        {
+            return $"Help documentation not found for {resourceName}";
+        }
+
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     static Command CreateEfMigrateCommand()
