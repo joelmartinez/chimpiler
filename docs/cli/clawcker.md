@@ -150,6 +150,6 @@ chimpiler clawcker start myagent
 
 ## Notes
 
-- Multiple instances can run simultaneously, each on their own port
+- Multiple instances can run simultaneously, each on its own port
 - The web UI will guide you through the OpenClaw onboarding process on first access
 - Instance data is stored in the current working directory, making it easy to version control
