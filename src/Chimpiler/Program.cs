@@ -14,6 +14,10 @@ class Program
         var efMigrateCommand = CreateEfMigrateCommand();
         rootCommand.AddCommand(efMigrateCommand);
 
+        // Create the clawcker command
+        var clawckerCommand = CreateClawckerCommand();
+        rootCommand.AddCommand(clawckerCommand);
+
         // Create the help command
         var helpCommand = CreateHelpCommand(rootCommand);
         rootCommand.AddCommand(helpCommand);
@@ -58,6 +62,7 @@ class Program
         Console.WriteLine();
         Console.WriteLine("Available Commands:");
         Console.WriteLine("  ef-migrate    Generate DACPACs from EF Core DbContext models");
+        Console.WriteLine("  clawcker      Manage local OpenClaw instances using Docker");
         Console.WriteLine("  help          Display help information for Chimpiler or a specific subcommand");
         Console.WriteLine();
         Console.WriteLine("Options:");
@@ -174,5 +179,81 @@ class Program
             verboseOption);
 
         return efMigrateCommand;
+    }
+
+    static Command CreateClawckerCommand()
+    {
+        var clawckerCommand = new Command("clawcker", "Manage local OpenClaw instances using Docker");
+
+        // Create the 'new' subcommand
+        var newCommand = new Command("new", "Create a new OpenClaw instance");
+        var nameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to create");
+        newCommand.AddArgument(nameArg);
+
+        newCommand.SetHandler((string name) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                service.CreateInstance(name);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, nameArg);
+
+        clawckerCommand.AddCommand(newCommand);
+
+        // Create the 'up' subcommand
+        var upCommand = new Command("up", "Start an OpenClaw instance");
+        var upNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to start");
+        upCommand.AddArgument(upNameArg);
+
+        upCommand.SetHandler((string name) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                service.StartInstance(name);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, upNameArg);
+
+        clawckerCommand.AddCommand(upCommand);
+
+        // Create the 'talk' subcommand
+        var talkCommand = new Command("talk", "Open the web UI for an instance in your browser");
+        var talkNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to access");
+        talkCommand.AddArgument(talkNameArg);
+
+        talkCommand.SetHandler((string name) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                service.OpenWebUI(name);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, talkNameArg);
+
+        clawckerCommand.AddCommand(talkCommand);
+
+        return clawckerCommand;
     }
 }
