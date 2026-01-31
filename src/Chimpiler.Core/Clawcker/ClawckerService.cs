@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-namespace Chimpiler.Core;
+namespace Chimpiler.Core.Clawcker;
 
 /// <summary>
 /// Service for managing OpenClaw instances via Docker (Clawcker)
@@ -13,15 +13,15 @@ public class ClawckerService
     private readonly Action<string>? _log;
     private readonly string _instancesDirectory;
     private const string OPENCLAW_IMAGE = "ghcr.io/phioranex/openclaw-docker:latest";
-    private const int DEFAULT_PORT = 18789;
+    private const int BASE_PORT = 18789;
+    private const int CONTAINER_PORT = 18789;
 
     public ClawckerService(Action<string>? log = null)
     {
         _log = log;
         
-        // Store instances in ~/.chimpiler/clawcker/
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        _instancesDirectory = Path.Combine(homeDir, ".chimpiler", "clawcker");
+        // Store instances in ./.clawcker/ (current working directory)
+        _instancesDirectory = Path.Combine(Directory.GetCurrentDirectory(), ".clawcker");
         
         // Ensure the directory exists
         Directory.CreateDirectory(_instancesDirectory);
@@ -109,11 +109,14 @@ public class ClawckerService
         // Generate a secure gateway token
         var gatewayToken = GenerateSecureToken();
 
+        // Find next available port
+        var port = GetNextAvailablePort();
+
         // Create instance metadata
         var instance = new ClawckerInstance
         {
             Name = name,
-            Port = DEFAULT_PORT,
+            Port = port,
             ConfigPath = configDir,
             WorkspacePath = workspaceDir,
             GatewayToken = gatewayToken,
@@ -147,7 +150,7 @@ public class ClawckerService
         LogInfo($"  Workspace: {workspaceDir}");
         LogInfo("");
         LogInfo($"Next steps:");
-        LogInfo($"  1. Run 'chimpiler clawcker up {name}' to start the instance");
+        LogInfo($"  1. Run 'chimpiler clawcker start {name}' to start the instance");
         LogInfo($"  2. Run 'chimpiler clawcker talk {name}' to open the web UI");
     }
 
@@ -199,7 +202,7 @@ public class ClawckerService
                 $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
                 $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
                 $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
-                $"-p {instance.Port}:{DEFAULT_PORT} " +
+                $"-p {instance.Port}:{CONTAINER_PORT} " +
                 $"{OPENCLAW_IMAGE} " +
                 $"gateway --allow-unconfigured";
 
@@ -233,7 +236,7 @@ public class ClawckerService
         if (!IsContainerRunning(instance.ContainerName))
         {
             throw new InvalidOperationException(
-                $"Instance '{name}' is not running. Start it first with 'chimpiler clawcker up {name}'");
+                $"Instance '{name}' is not running. Start it first with 'chimpiler clawcker start {name}'");
         }
 
         var url = $"http://localhost:{instance.Port}/?token={instance.GatewayToken}";
@@ -288,7 +291,7 @@ public class ClawckerService
         }
 
         LogInfo($"✓ Instance '{name}' stopped");
-        LogInfo($"To start it again, run: chimpiler clawcker up {name}");
+        LogInfo($"To start it again, run: chimpiler clawcker start {name}");
     }
 
     /// <summary>
@@ -471,6 +474,34 @@ public class ClawckerService
             rng.GetBytes(bytes);
         }
         return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    private int GetNextAvailablePort()
+    {
+        // Get all existing instances and their ports
+        var existingPorts = new HashSet<int>();
+        
+        if (Directory.Exists(_instancesDirectory))
+        {
+            foreach (var dir in Directory.GetDirectories(_instancesDirectory))
+            {
+                var name = Path.GetFileName(dir);
+                var instance = LoadInstanceMetadata(name);
+                if (instance != null)
+                {
+                    existingPorts.Add(instance.Port);
+                }
+            }
+        }
+
+        // Find the next available port starting from BASE_PORT
+        var port = BASE_PORT;
+        while (existingPorts.Contains(port))
+        {
+            port++;
+        }
+
+        return port;
     }
 
     #endregion

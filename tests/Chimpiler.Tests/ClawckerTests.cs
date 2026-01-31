@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Chimpiler.Core;
+using Chimpiler.Core.Clawcker;
 using Xunit;
 
 namespace Chimpiler.Tests;

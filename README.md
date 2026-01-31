@@ -14,7 +14,7 @@ Clawcker makes it trivially easy to create, run, and access local OpenClaw insta
 
 ```bash
 chimpiler clawcker new myagent
-chimpiler clawcker up myagent
+chimpiler clawcker start myagent
 chimpiler clawcker talk myagent
 ```
 

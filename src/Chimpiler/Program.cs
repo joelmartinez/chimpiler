@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Reflection;
 using Chimpiler.Core;
+using Chimpiler.Core.Clawcker;
 
 namespace Chimpiler;
 
@@ -213,14 +214,14 @@ class Program
 
         clawckerCommand.AddCommand(newCommand);
 
-        // Create the 'up' subcommand
-        var upCommand = new Command("up", "Start an OpenClaw instance");
-        var upNameArg = new Argument<string>(
+        // Create the 'start' subcommand
+        var startCommand = new Command("start", "Start an OpenClaw instance");
+        var startNameArg = new Argument<string>(
             name: "name",
             description: "Name of the instance to start");
-        upCommand.AddArgument(upNameArg);
+        startCommand.AddArgument(startNameArg);
 
-        upCommand.SetHandler((string name) =>
+        startCommand.SetHandler((string name) =>
         {
             try
             {
@@ -232,9 +233,9 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, upNameArg);
+        }, startNameArg);
 
-        clawckerCommand.AddCommand(upCommand);
+        clawckerCommand.AddCommand(startCommand);
 
         // Create the 'talk' subcommand
         var talkCommand = new Command("talk", "Open the web UI for an instance in your browser");
@@ -300,14 +301,14 @@ class Program
 
         clawckerCommand.AddCommand(listCommand);
 
-        // Create the 'down' subcommand
-        var downCommand = new Command("down", "Stop a running OpenClaw instance");
-        var downNameArg = new Argument<string>(
+        // Create the 'stop' subcommand
+        var stopCommand = new Command("stop", "Stop a running OpenClaw instance");
+        var stopNameArg = new Argument<string>(
             name: "name",
             description: "Name of the instance to stop");
-        downCommand.AddArgument(downNameArg);
+        stopCommand.AddArgument(stopNameArg);
 
-        downCommand.SetHandler((string name) =>
+        stopCommand.SetHandler((string name) =>
         {
             try
             {
@@ -319,9 +320,9 @@ class Program
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, downNameArg);
+        }, stopNameArg);
 
-        clawckerCommand.AddCommand(downCommand);
+        clawckerCommand.AddCommand(stopCommand);
 
         return clawckerCommand;
     }

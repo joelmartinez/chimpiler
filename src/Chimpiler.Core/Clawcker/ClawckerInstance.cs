@@ -1,4 +1,4 @@
-namespace Chimpiler.Core;
+namespace Chimpiler.Core.Clawcker;
 
 /// <summary>
 /// Represents a Clawcker instance configuration
