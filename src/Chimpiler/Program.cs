@@ -254,6 +254,70 @@ class Program
 
         clawckerCommand.AddCommand(talkCommand);
 
+        // Create the 'list' subcommand
+        var listCommand = new Command("list", "List all Clawcker instances");
+
+        listCommand.SetHandler(() =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                var instances = service.ListInstances();
+                
+                if (instances.Count == 0)
+                {
+                    Console.WriteLine("No Clawcker instances found.");
+                    Console.WriteLine("");
+                    Console.WriteLine("Create a new instance with:");
+                    Console.WriteLine("  chimpiler clawcker new <name>");
+                }
+                else
+                {
+                    Console.WriteLine("Clawcker Instances:");
+                    Console.WriteLine("");
+                    foreach (var instance in instances)
+                    {
+                        var status = service.GetInstanceStatus(instance.Name);
+                        Console.WriteLine($"  {instance.Name}");
+                        Console.WriteLine($"    Status: {status}");
+                        Console.WriteLine($"    Port: {instance.Port}");
+                        Console.WriteLine($"    Created: {instance.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC");
+                        Console.WriteLine("");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        });
+
+        clawckerCommand.AddCommand(listCommand);
+
+        // Create the 'down' subcommand
+        var downCommand = new Command("down", "Stop a running OpenClaw instance");
+        var downNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to stop");
+        downCommand.AddArgument(downNameArg);
+
+        downCommand.SetHandler((string name) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                service.StopInstance(name);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, downNameArg);
+
+        clawckerCommand.AddCommand(downCommand);
+
         return clawckerCommand;
     }
 }

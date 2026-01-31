@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -105,6 +106,9 @@ public class ClawckerService
         Directory.CreateDirectory(configDir);
         Directory.CreateDirectory(workspaceDir);
 
+        // Generate a secure gateway token
+        var gatewayToken = GenerateSecureToken();
+
         // Create instance metadata
         var instance = new ClawckerInstance
         {
@@ -112,6 +116,7 @@ public class ClawckerService
             Port = DEFAULT_PORT,
             ConfigPath = configDir,
             WorkspacePath = workspaceDir,
+            GatewayToken = gatewayToken,
             IsCreated = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -121,9 +126,15 @@ public class ClawckerService
 
         LogInfo("Pulling OpenClaw Docker image...");
         LogInfo("(This may take a few minutes on first run)");
+        LogInfo("");
+        LogInfo("--- Docker Output ---");
         
         // Pull the Docker image
         var pullResult = RunCommand("docker", $"pull {OPENCLAW_IMAGE}");
+        
+        LogInfo("--- End Docker Output ---");
+        LogInfo("");
+        
         if (pullResult.ExitCode != 0)
         {
             // Clean up on failure
@@ -185,11 +196,12 @@ public class ClawckerService
             var dockerArgs = $"run -d " +
                 $"--name {instance.ContainerName} " +
                 $"--restart unless-stopped " +
+                $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
                 $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
                 $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
                 $"-p {instance.Port}:{DEFAULT_PORT} " +
                 $"{OPENCLAW_IMAGE} " +
-                $"gateway start --foreground";
+                $"gateway --allow-unconfigured";
 
             var runResult = RunCommand("docker", dockerArgs);
             if (runResult.ExitCode != 0)
@@ -199,7 +211,7 @@ public class ClawckerService
         }
 
         LogInfo($"✓ Instance '{name}' is now running");
-        LogInfo($"  Access the web UI at: http://localhost:{instance.Port}");
+        LogInfo($"  Access the web UI at: http://localhost:{instance.Port}/?token={instance.GatewayToken}");
         LogInfo($"  Container name: {instance.ContainerName}");
         LogInfo("");
         LogInfo($"To open the web UI in your browser, run:");
@@ -224,7 +236,7 @@ public class ClawckerService
                 $"Instance '{name}' is not running. Start it first with 'chimpiler clawcker up {name}'");
         }
 
-        var url = $"http://localhost:{instance.Port}";
+        var url = $"http://localhost:{instance.Port}/?token={instance.GatewayToken}";
         LogInfo($"Opening web UI for instance '{name}'...");
         LogInfo($"URL: {url}");
 
@@ -238,6 +250,45 @@ public class ClawckerService
             LogInfo($"Could not automatically open browser: {ex.Message}");
             LogInfo($"Please manually open: {url}");
         }
+    }
+
+    /// <summary>
+    /// Stops a running OpenClaw instance
+    /// </summary>
+    public void StopInstance(string name)
+    {
+        var instance = LoadInstanceMetadata(name);
+        if (instance == null)
+        {
+            throw new InvalidOperationException($"Instance '{name}' not found. Create it first with 'chimpiler clawcker new {name}'");
+        }
+
+        LogInfo($"Stopping Clawcker instance: {name}");
+
+        // Check if container exists
+        if (!CheckContainerExists(instance.ContainerName))
+        {
+            LogInfo($"Instance '{name}' has no running container");
+            return;
+        }
+
+        // Check if it's running
+        if (!IsContainerRunning(instance.ContainerName))
+        {
+            LogInfo($"Instance '{name}' is already stopped");
+            return;
+        }
+
+        // Stop the container
+        LogInfo("Stopping container...");
+        var stopResult = RunCommand("docker", $"stop {instance.ContainerName}", captureOutput: true);
+        if (stopResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"Failed to stop container '{instance.ContainerName}'");
+        }
+
+        LogInfo($"✓ Instance '{name}' stopped");
+        LogInfo($"To start it again, run: chimpiler clawcker up {name}");
     }
 
     /// <summary>
@@ -409,6 +460,17 @@ public class ClawckerService
     private void LogInfo(string message)
     {
         _log?.Invoke(message);
+    }
+
+    private string GenerateSecureToken()
+    {
+        // Generate a 64-character random token (256 bits of entropy)
+        var bytes = new byte[32];
+        using (var rng = RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(bytes);
+        }
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
     #endregion

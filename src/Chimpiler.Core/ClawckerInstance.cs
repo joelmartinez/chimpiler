@@ -31,6 +31,11 @@ public class ClawckerInstance
     public string WorkspacePath { get; set; } = string.Empty;
 
     /// <summary>
+    /// The gateway authentication token
+    /// </summary>
+    public string GatewayToken { get; set; } = string.Empty;
+
+    /// <summary>
     /// Whether the instance has been created and configured
     /// </summary>
     public bool IsCreated { get; set; }
