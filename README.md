@@ -4,9 +4,29 @@ A multi-purpose CLI tooling ecosystem for .NET.
 
 ## Overview
 
-Chimpiler is an extensible CLI framework designed to provide pragmatic tooling for modern .NET applications. While designed to grow over time, the initial release focuses on the `ef-migrate` subcommand — a tool that generates **DACPAC files** directly from Entity Framework Core DbContext models.
+Chimpiler is an extensible CLI framework designed to provide pragmatic tooling for modern .NET applications and development workflows.
 
 ## Features
+
+### `chimpiler clawcker` — OpenClaw Instance Manager
+
+Clawcker makes it trivially easy to create, run, and access local OpenClaw instances using Docker. Get started with just three commands:
+
+```bash
+chimpiler clawcker new myagent
+chimpiler clawcker up myagent
+chimpiler clawcker talk myagent
+```
+
+**Key Features:**
+- ✅ One-command instance creation
+- ✅ Automatic Docker image pulling
+- ✅ Secure random token generation
+- ✅ Persistent configuration and workspace
+- ✅ Easy web UI access
+- ✅ Multiple instance management
+
+[Learn more about Clawcker →](docs/cli/clawcker.md)
 
 ### `chimpiler ef-migrate` — EF Core Model → DACPAC Generator
 
@@ -23,6 +43,8 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 - ✅ DACPAC artifacts compatible with SqlPackage and Azure DevOps
 - ✅ Deterministic and repeatable output
 - ✅ No dependency on SQL Server during build
+
+[Learn more about ef-migrate →](docs/cli/ef-migrate.md)
 
 ## Installation
 

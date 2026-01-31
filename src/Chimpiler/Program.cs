@@ -79,6 +79,11 @@ class Program
             var helpText = LoadEmbeddedMarkdown("ef-migrate.md");
             Console.WriteLine(helpText);
         }
+        else if (subcommand.Equals("clawcker", StringComparison.OrdinalIgnoreCase))
+        {
+            var helpText = LoadEmbeddedMarkdown("clawcker.md");
+            Console.WriteLine(helpText);
+        }
         else
         {
             Console.WriteLine($"Unknown subcommand: {subcommand}");

@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\docs\cli\ef-migrate.md" Link="Resources\ef-migrate.md" />
+    <EmbeddedResource Include="..\..\docs\cli\clawcker.md" Link="Resources\clawcker.md" />
   </ItemGroup>
 
   <ItemGroup>
