@@ -110,6 +110,9 @@ public class ClawckerService
         // Generate a secure gateway token
         var gatewayToken = GenerateSecureToken();
 
+        // Create OpenClaw configuration to allow insecure auth (needed for Docker)
+        CreateOpenClawConfig(configDir, gatewayToken);
+
         // Find next available port
         var port = GetNextAvailablePort();
 
@@ -205,7 +208,7 @@ public class ClawckerService
                 $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
                 $"-p {instance.Port}:{CONTAINER_PORT} " +
                 $"{OPENCLAW_IMAGE} " +
-                $"gateway --allow-unconfigured --bind lan";
+                $"gateway";
 
             var runResult = RunCommand("docker", dockerArgs);
             if (runResult.ExitCode != 0)
@@ -566,6 +569,36 @@ public class ClawckerService
         }
 
         return port;
+    }
+
+    private void CreateOpenClawConfig(string configDir, string gatewayToken)
+    {
+        var config = new
+        {
+            gateway = new
+            {
+                mode = "local",
+                bind = "lan",
+                auth = new
+                {
+                    mode = "token",
+                    token = gatewayToken
+                },
+                controlUi = new
+                {
+                    allowInsecureAuth = true
+                }
+            }
+        };
+
+        var configPath = Path.Combine(configDir, "openclaw.json");
+        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions 
+        { 
+            WriteIndented = true 
+        });
+        File.WriteAllText(configPath, json);
+        
+        LogInfo($"Created OpenClaw configuration at: {configPath}");
     }
 
     #endregion
