@@ -166,6 +166,26 @@ public class ClawckerServiceTests : IDisposable
         Assert.Contains("not found", ex.Message);
     }
 
+    [Fact]
+    public async Task IsInstanceHealthy_ForNonExistentInstance_ShouldReturnFalse()
+    {
+        // Act
+        var isHealthy = await _service.IsInstanceHealthy("non-existent");
+
+        // Assert
+        Assert.False(isHealthy);
+    }
+
+    [Fact]
+    public async Task WaitForInstanceHealthy_ForNonExistentInstance_ShouldReturnFalse()
+    {
+        // Act
+        var isHealthy = await _service.WaitForInstanceHealthy("non-existent", maxWaitSeconds: 1);
+
+        // Assert
+        Assert.False(isHealthy);
+    }
+
     private void CleanupInstance(string name)
     {
         try

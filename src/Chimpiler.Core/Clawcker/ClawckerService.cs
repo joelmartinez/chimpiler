@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Net.Http;
 
 namespace Chimpiler.Core.Clawcker;
 
@@ -341,6 +342,69 @@ public class ClawckerService
         }
 
         return "stopped";
+    }
+
+    /// <summary>
+    /// Checks if the OpenClaw gateway is healthy and responding
+    /// </summary>
+    public async Task<bool> IsInstanceHealthy(string name, int timeoutSeconds = 5)
+    {
+        var instance = LoadInstanceMetadata(name);
+        if (instance == null)
+        {
+            return false;
+        }
+
+        // First check if container is running
+        if (!IsContainerRunning(instance.ContainerName))
+        {
+            return false;
+        }
+
+        // Try to connect to the gateway endpoint
+        try
+        {
+            using var httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(timeoutSeconds)
+            };
+
+            // Try the root endpoint (should redirect or return a page)
+            var url = $"http://localhost:{instance.Port}/";
+            var response = await httpClient.GetAsync(url);
+
+            // If we get any response (even redirect), the gateway is responding
+            return response.IsSuccessStatusCode || 
+                   response.StatusCode == System.Net.HttpStatusCode.Redirect ||
+                   response.StatusCode == System.Net.HttpStatusCode.MovedPermanently ||
+                   response.StatusCode == System.Net.HttpStatusCode.Found ||
+                   response.StatusCode == System.Net.HttpStatusCode.Unauthorized; // Auth required means it's up
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Waits for an instance to become healthy
+    /// </summary>
+    public async Task<bool> WaitForInstanceHealthy(string name, int maxWaitSeconds = 30)
+    {
+        var startTime = DateTime.UtcNow;
+        var checkIntervalMs = 500; // Check every 500ms
+
+        while ((DateTime.UtcNow - startTime).TotalSeconds < maxWaitSeconds)
+        {
+            if (await IsInstanceHealthy(name, timeoutSeconds: 2))
+            {
+                return true;
+            }
+
+            await Task.Delay(checkIntervalMs);
+        }
+
+        return false;
     }
 
     #region Helper Methods

@@ -221,12 +221,28 @@ class Program
             description: "Name of the instance to start");
         startCommand.AddArgument(startNameArg);
 
-        startCommand.SetHandler((string name) =>
+        startCommand.SetHandler(async (string name) =>
         {
             try
             {
                 var service = new ClawckerService(Console.WriteLine);
                 service.StartInstance(name);
+                
+                // Wait for the instance to become healthy
+                Console.WriteLine("");
+                Console.WriteLine("Waiting for OpenClaw gateway to become ready...");
+                var isHealthy = await service.WaitForInstanceHealthy(name, maxWaitSeconds: 30);
+                
+                if (isHealthy)
+                {
+                    Console.WriteLine("✓ OpenClaw gateway is ready and responding");
+                }
+                else
+                {
+                    Console.WriteLine("⚠ Warning: OpenClaw gateway did not respond within 30 seconds");
+                    Console.WriteLine("  The container is running, but the gateway may still be starting up.");
+                    Console.WriteLine("  Run 'chimpiler clawcker health {0}' to check status.", name);
+                }
             }
             catch (Exception ex)
             {
@@ -323,6 +339,69 @@ class Program
         }, stopNameArg);
 
         clawckerCommand.AddCommand(stopCommand);
+
+        // Create the 'health' subcommand
+        var healthCommand = new Command("health", "Check if an OpenClaw instance is healthy and responding");
+        var healthNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to check");
+        healthCommand.AddArgument(healthNameArg);
+
+        healthCommand.SetHandler(async (string name) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                var status = service.GetInstanceStatus(name);
+                
+                Console.WriteLine($"Instance: {name}");
+                Console.WriteLine($"Container Status: {status}");
+                
+                if (status == "running")
+                {
+                    Console.WriteLine("");
+                    Console.WriteLine("Checking OpenClaw gateway health...");
+                    var isHealthy = await service.IsInstanceHealthy(name, timeoutSeconds: 5);
+                    
+                    if (isHealthy)
+                    {
+                        Console.WriteLine("✓ OpenClaw gateway is healthy and responding");
+                        Environment.ExitCode = 0;
+                    }
+                    else
+                    {
+                        Console.WriteLine("✗ OpenClaw gateway is not responding");
+                        Console.WriteLine("  The container is running, but the gateway is not accessible.");
+                        Console.WriteLine("  Check container logs with: docker logs clawcker-{0}", name);
+                        Environment.ExitCode = 1;
+                    }
+                }
+                else if (status == "stopped")
+                {
+                    Console.WriteLine("✗ Instance is not running");
+                    Console.WriteLine($"  Start it with: chimpiler clawcker start {name}");
+                    Environment.ExitCode = 1;
+                }
+                else if (status == "created (not started)")
+                {
+                    Console.WriteLine("✗ Instance has not been started yet");
+                    Console.WriteLine($"  Start it with: chimpiler clawcker start {name}");
+                    Environment.ExitCode = 1;
+                }
+                else
+                {
+                    Console.WriteLine("✗ Instance not found");
+                    Environment.ExitCode = 1;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, healthNameArg);
+
+        clawckerCommand.AddCommand(healthCommand);
 
         return clawckerCommand;
     }
