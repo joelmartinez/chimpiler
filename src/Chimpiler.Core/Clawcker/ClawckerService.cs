@@ -205,7 +205,7 @@ public class ClawckerService
                 $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
                 $"-p {instance.Port}:{CONTAINER_PORT} " +
                 $"{OPENCLAW_IMAGE} " +
-                $"gateway --allow-unconfigured";
+                $"gateway --allow-unconfigured --bind lan";
 
             var runResult = RunCommand("docker", dockerArgs);
             if (runResult.ExitCode != 0)
