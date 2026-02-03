@@ -61,9 +61,9 @@ public class ClawckerService
     }
 
     /// <summary>
-    /// Creates a new OpenClaw instance
+    /// Creates a new OpenClaw instance with interactive prompts for credentials
     /// </summary>
-    public void CreateInstance(string name)
+    public async Task CreateInstanceAsync(string name, string? provider = null, string? apiKey = null)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -85,7 +85,53 @@ public class ClawckerService
             throw new InvalidOperationException($"Instance '{name}' already exists");
         }
 
+        // Prompt for provider if not specified
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            LogInfo("Select AI provider:");
+            LogInfo("  1. Anthropic (Claude)");
+            LogInfo("  2. OpenAI");
+            LogInfo("  3. OpenRouter");
+            LogInfo("  4. Google (Gemini)");
+            LogInfo("");
+            Console.Write("Enter choice [1-4] (default: 1): ");
+            var choice = Console.ReadLine()?.Trim();
+            
+            provider = choice switch
+            {
+                "2" => "openai",
+                "3" => "openrouter",
+                "4" => "gemini",
+                _ => "anthropic"
+            };
+        }
+
+        // Prompt for API key if not specified
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            var providerName = provider switch
+            {
+                "openai" => "OpenAI",
+                "openrouter" => "OpenRouter",
+                "gemini" => "Google Gemini",
+                _ => "Anthropic"
+            };
+            
+            LogInfo("");
+            LogInfo($"Enter your {providerName} API key:");
+            LogInfo($"(You can get one from: {GetProviderUrl(provider)})");
+            Console.Write("API Key: ");
+            apiKey = ReadPassword();
+            
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("API key is required");
+            }
+        }
+
+        LogInfo("");
         LogInfo($"Creating new Clawcker instance: {name}");
+        LogInfo($"Provider: {GetProviderDisplayName(provider)}");
 
         // Check Docker prerequisites
         if (!IsDockerAvailable())
@@ -110,7 +156,7 @@ public class ClawckerService
         // Generate a secure gateway token
         var gatewayToken = GenerateSecureToken();
 
-        // Create OpenClaw configuration to allow insecure auth (needed for Docker)
+        // Create OpenClaw configuration
         CreateOpenClawConfig(configDir, gatewayToken);
 
         // Find next available port
@@ -149,9 +195,14 @@ public class ClawckerService
             throw new InvalidOperationException("Failed to pull OpenClaw Docker image");
         }
 
-        LogInfo($"✓ Instance '{name}' created successfully");
+        // Start the container temporarily to run onboarding
+        LogInfo("Starting container for configuration...");
+        await StartContainerForOnboarding(instance, provider!, apiKey!);
+
+        LogInfo($"✓ Instance '{name}' created and configured successfully");
         LogInfo($"  Configuration: {configDir}");
         LogInfo($"  Workspace: {workspaceDir}");
+        LogInfo($"  Provider: {GetProviderDisplayName(provider!)}");
         LogInfo("");
         LogInfo($"Next steps:");
         LogInfo($"  1. Run 'chimpiler clawcker start {name}' to start the instance");
@@ -599,6 +650,118 @@ public class ClawckerService
         File.WriteAllText(configPath, json);
         
         LogInfo($"Created OpenClaw configuration at: {configPath}");
+    }
+
+    private async Task StartContainerForOnboarding(ClawckerInstance instance, string provider, string apiKey)
+    {
+        // Start container temporarily
+        var dockerArgs = $"run -d " +
+            $"--name {instance.ContainerName}-setup " +
+            $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
+            $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
+            $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
+            $"{OPENCLAW_IMAGE} " +
+            $"tail -f /dev/null";  // Keep container running
+
+        var runResult = RunCommand("docker", dockerArgs, captureOutput: true);
+        if (runResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException("Failed to start temporary container for setup");
+        }
+
+        try
+        {
+            // Wait a moment for container to be ready
+            await Task.Delay(2000);
+
+            // Run onboard with the API key
+            var apiKeyArg = provider switch
+            {
+                "openai" => $"--openai-api-key {apiKey}",
+                "openrouter" => $"--openrouter-api-key {apiKey}",
+                "gemini" => $"--gemini-api-key {apiKey}",
+                _ => $"--anthropic-api-key {apiKey}"
+            };
+
+            LogInfo("Configuring OpenClaw with your credentials...");
+            var onboardArgs = $"exec {instance.ContainerName}-setup " +
+                $"node /app/dist/entry.js onboard " +
+                $"--non-interactive " +
+                $"--accept-risk " +
+                $"--flow quickstart " +
+                $"--mode local " +
+                $"{apiKeyArg} " +
+                $"--gateway-port {CONTAINER_PORT} " +
+                $"--gateway-bind lan " +
+                $"--gateway-auth token " +
+                $"--gateway-token {instance.GatewayToken} " +
+                $"--skip-daemon " +
+                $"--skip-channels " +
+                $"--skip-ui";
+
+            var onboardResult = RunCommand("docker", onboardArgs);
+            if (onboardResult.ExitCode != 0)
+            {
+                LogInfo("⚠ Onboarding completed with warnings (this is usually fine)");
+            }
+            else
+            {
+                LogInfo("✓ OpenClaw configured successfully");
+            }
+        }
+        finally
+        {
+            // Stop and remove the temporary container
+            RunCommand("docker", $"rm -f {instance.ContainerName}-setup", captureOutput: true);
+        }
+    }
+
+    private string ReadPassword()
+    {
+        var password = "";
+        ConsoleKeyInfo key;
+        
+        do
+        {
+            key = Console.ReadKey(true);
+            
+            if (key.Key != ConsoleKey.Backspace && key.Key != ConsoleKey.Enter)
+            {
+                password += key.KeyChar;
+                Console.Write("*");
+            }
+            else if (key.Key == ConsoleKey.Backspace && password.Length > 0)
+            {
+                password = password[0..^1];
+                Console.Write("\b \b");
+            }
+        }
+        while (key.Key != ConsoleKey.Enter);
+        
+        Console.WriteLine();
+        return password;
+    }
+
+    private string GetProviderUrl(string provider)
+    {
+        return provider switch
+        {
+            "openai" => "https://platform.openai.com/api-keys",
+            "openrouter" => "https://openrouter.ai/keys",
+            "gemini" => "https://aistudio.google.com/app/apikey",
+            _ => "https://console.anthropic.com/settings/keys"
+        };
+    }
+
+    private string GetProviderDisplayName(string provider)
+    {
+        return provider switch
+        {
+            "openai" => "OpenAI",
+            "openrouter" => "OpenRouter",
+            "gemini" => "Google Gemini",
+            _ => "Anthropic (Claude)"
+        };
     }
 
     #endregion

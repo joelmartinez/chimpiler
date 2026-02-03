@@ -55,24 +55,24 @@ public class ClawckerServiceTests : IDisposable
     }
 
     [Fact]
-    public void CreateInstance_WithEmptyName_ShouldThrowArgumentException()
+    public async Task CreateInstance_WithEmptyName_ShouldThrowArgumentException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => _service.CreateInstance(""));
-        Assert.Throws<ArgumentException>(() => _service.CreateInstance("   "));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await _service.CreateInstanceAsync("", "anthropic", "test-key"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await _service.CreateInstanceAsync("   ", "anthropic", "test-key"));
     }
 
     [Fact]
-    public void CreateInstance_WithInvalidCharacters_ShouldThrowArgumentException()
+    public async Task CreateInstance_WithInvalidCharacters_ShouldThrowArgumentException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => _service.CreateInstance("my instance"));
-        Assert.Throws<ArgumentException>(() => _service.CreateInstance("my@instance"));
-        Assert.Throws<ArgumentException>(() => _service.CreateInstance("my/instance"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await _service.CreateInstanceAsync("my instance", "anthropic", "test-key"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await _service.CreateInstanceAsync("my@instance", "anthropic", "test-key"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await _service.CreateInstanceAsync("my/instance", "anthropic", "test-key"));
     }
 
     [Fact]
-    public void CreateInstance_WithValidName_ShouldCreateDirectoryStructure()
+    public async Task CreateInstance_WithValidName_ShouldCreateDirectoryStructure()
     {
         // Skip this test if Docker is not available
         if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
@@ -86,7 +86,7 @@ public class ClawckerServiceTests : IDisposable
         // Act
         try
         {
-            _service.CreateInstance(instanceName);
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "sk-test-key-12345");
 
             // Assert
             var instanceDir = Path.Combine(_tempInstancesDir, instanceName);
@@ -103,7 +103,7 @@ public class ClawckerServiceTests : IDisposable
     }
 
     [Fact]
-    public void CreateInstance_WhenAlreadyExists_ShouldThrowInvalidOperationException()
+    public async Task CreateInstance_WhenAlreadyExists_ShouldThrowInvalidOperationException()
     {
         // Skip this test if Docker is not available
         if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
@@ -116,10 +116,10 @@ public class ClawckerServiceTests : IDisposable
         
         try
         {
-            _service.CreateInstance(instanceName);
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "sk-test-key-12345");
 
             // Act & Assert
-            var ex = Assert.Throws<InvalidOperationException>(() => _service.CreateInstance(instanceName));
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () => await _service.CreateInstanceAsync(instanceName, "anthropic", "sk-test-key-12345"));
             Assert.Contains("already exists", ex.Message);
         }
         finally

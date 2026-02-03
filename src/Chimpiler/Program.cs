@@ -197,20 +197,32 @@ class Program
             name: "name",
             description: "Name of the instance to create");
         newCommand.AddArgument(nameArg);
+        
+        var providerOption = new Option<string?>(
+            aliases: new[] { "--provider" },
+            description: "AI provider (anthropic, openai, openrouter, gemini, etc.)");
+        providerOption.AddAlias("-p");
+        newCommand.AddOption(providerOption);
+        
+        var apiKeyOption = new Option<string?>(
+            aliases: new[] { "--api-key" },
+            description: "API key for the selected provider");
+        apiKeyOption.AddAlias("-k");
+        newCommand.AddOption(apiKeyOption);
 
-        newCommand.SetHandler((string name) =>
+        newCommand.SetHandler(async (string name, string? provider, string? apiKey) =>
         {
             try
             {
                 var service = new ClawckerService(Console.WriteLine);
-                service.CreateInstance(name);
+                await service.CreateInstanceAsync(name, provider, apiKey);
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
                 Environment.ExitCode = 1;
             }
-        }, nameArg);
+        }, nameArg, providerOption, apiKeyOption);
 
         clawckerCommand.AddCommand(newCommand);
 
