@@ -25,7 +25,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>chimpiler</ToolCommandName>
     <PackageId>Chimpiler</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Joel Martinez</Authors>
     <Description>A multi-purpose CLI tooling ecosystem for .NET</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -33,7 +33,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/joelmartinez/chimpiler</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>dotnet;cli;efcore;dacpac</PackageTags>
+    <PackageTags>dotnet;cli;efcore;dacpac;openclaw</PackageTags>
   </PropertyGroup>
 
 </Project>
