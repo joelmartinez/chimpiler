@@ -415,6 +415,41 @@ class Program
 
         clawckerCommand.AddCommand(healthCommand);
 
+        // Create the 'configure' subcommand
+        var configureCommand = new Command("configure", "Configure or reconfigure an instance with a new provider/model");
+        var configureNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to configure");
+        configureCommand.AddArgument(configureNameArg);
+        
+        var configureProviderOption = new Option<string?>(
+            aliases: new[] { "--provider" },
+            description: "AI provider (anthropic, openai, openrouter, gemini)");
+        configureProviderOption.AddAlias("-p");
+        configureCommand.AddOption(configureProviderOption);
+        
+        var configureApiKeyOption = new Option<string?>(
+            aliases: new[] { "--api-key" },
+            description: "API key for the selected provider");
+        configureApiKeyOption.AddAlias("-k");
+        configureCommand.AddOption(configureApiKeyOption);
+
+        configureCommand.SetHandler(async (string name, string? provider, string? apiKey) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                await service.ConfigureInstanceAsync(name, provider, apiKey);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, configureNameArg, configureProviderOption, configureApiKeyOption);
+
+        clawckerCommand.AddCommand(configureCommand);
+
         return clawckerCommand;
     }
 }

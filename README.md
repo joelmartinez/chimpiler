@@ -48,6 +48,20 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 
 ## Installation
 
+### As a .NET Global Tool
+
+Install Chimpiler globally using the .NET CLI:
+
+```bash
+dotnet tool install -g Chimpiler
+```
+
+To update to the latest version:
+
+```bash
+dotnet tool update -g Chimpiler
+```
+
 ### From Source
 
 ```bash
@@ -55,9 +69,8 @@ git clone https://github.com/joelmartinez/chimpiler.git
 cd chimpiler
 dotnet build
 dotnet pack src/Chimpiler/Chimpiler.csproj -c Release
+dotnet tool install -g --add-source ./src/Chimpiler/bin/Release Chimpiler
 ```
-
-The tool will be packaged as a .NET global tool (future release will publish to NuGet).
 
 ## Usage
 

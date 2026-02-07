@@ -9,19 +9,24 @@ Clawcker is a subcommand of Chimpiler that makes it trivially easy to create, ru
 
 ## Quick Start
 
-Create, start, and access an OpenClaw instance with three commands:
+Create and access an OpenClaw instance with two commands:
 
 ```bash
 chimpiler clawcker new myagent
-chimpiler clawcker start myagent
 chimpiler clawcker talk myagent
 ```
+
+The `new` command will prompt you for your AI provider and API key, then automatically start the instance.
 
 ## Commands
 
 ### `chimpiler clawcker new <name>`
 
 Creates a new OpenClaw instance with the specified name.
+
+**Options:**
+- `--provider, -p` - AI provider (anthropic, openai, openrouter, gemini). If not specified, you'll be prompted to choose.
+- `--api-key, -k` - API key for the selected provider. If not specified, you'll be prompted to enter it.
 
 **What it does:**
 - Checks that Docker is installed and running
@@ -30,7 +35,34 @@ Creates a new OpenClaw instance with the specified name.
 - Creates a workspace directory at `./.clawcker/<name>/workspace`
 - Allocates a unique port for this instance
 - Generates a secure random gateway authentication token
-- Saves instance metadata
+- Configures OpenClaw with your provider credentials and sets the default model
+- Automatically starts the instance
+
+**Default models by provider:**
+- Anthropic: `anthropic/claude-sonnet-4`
+- OpenAI: `openai/gpt-5.2`
+- OpenRouter: `openrouter/anthropic/claude-sonnet-4`
+- Google Gemini: `google-gemini/gemini-2.5-pro`
+
+### `chimpiler clawcker configure <name>`
+
+Configures or reconfigures an existing instance with a new provider/model.
+
+**Options:**
+- `--provider, -p` - AI provider (anthropic, openai, openrouter, gemini). If not specified, you'll be prompted to choose.
+- `--api-key, -k` - API key for the selected provider. If not specified, you'll be prompted to enter it.
+
+**What it does:**
+- Stops the instance if it's running
+- Configures authentication for the new provider
+- Sets the default model for the provider
+- Restarts the instance if it was previously running
+
+**Example:**
+```bash
+# Switch an existing instance from Anthropic to OpenAI
+chimpiler clawcker configure myagent --provider openai --api-key sk-...
+```
 
 ### `chimpiler clawcker start <name>`
 
@@ -71,6 +103,14 @@ Stops a running OpenClaw instance.
 - Checks if the instance exists
 - Stops the Docker container (but does not remove it)
 - The instance can be restarted with `start`
+
+### `chimpiler clawcker health <name>`
+
+Checks if an OpenClaw instance is healthy and responding.
+
+**What it does:**
+- Checks the container status
+- Tests if the OpenClaw gateway is responding to health checks
 
 ## Instance Storage
 
@@ -126,11 +166,20 @@ Each instance automatically receives its own unique port, starting from 18789. W
 
 ## Examples
 
-### Create and start a new instance
+### Create a new instance (auto-starts)
 ```bash
 chimpiler clawcker new myagent
-chimpiler clawcker start myagent
 chimpiler clawcker talk myagent
+```
+
+### Create with specific provider
+```bash
+chimpiler clawcker new myagent --provider openai --api-key sk-...
+```
+
+### Switch to a different provider
+```bash
+chimpiler clawcker configure myagent --provider anthropic
 ```
 
 ### List all instances
@@ -148,8 +197,14 @@ chimpiler clawcker stop myagent
 chimpiler clawcker start myagent
 ```
 
+### Check instance health
+```bash
+chimpiler clawcker health myagent
+```
+
 ## Notes
 
 - Multiple instances can run simultaneously, each on its own port
-- The web UI will guide you through the OpenClaw onboarding process on first access
+- Instances auto-start after creation - no need to run `start` separately
+- Use `configure` to switch providers or update API keys without recreating the instance
 - Instance data is stored in the current working directory, making it easy to version control

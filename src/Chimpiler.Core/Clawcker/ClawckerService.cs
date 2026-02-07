@@ -171,7 +171,9 @@ public class ClawckerService
             WorkspacePath = workspaceDir,
             GatewayToken = gatewayToken,
             IsCreated = true,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Provider = provider,
+            ApiKey = apiKey
         };
 
         // Save instance metadata
@@ -204,9 +206,10 @@ public class ClawckerService
         LogInfo($"  Workspace: {workspaceDir}");
         LogInfo($"  Provider: {GetProviderDisplayName(provider!)}");
         LogInfo("");
-        LogInfo($"Next steps:");
-        LogInfo($"  1. Run 'chimpiler clawcker start {name}' to start the instance");
-        LogInfo($"  2. Run 'chimpiler clawcker talk {name}' to open the web UI");
+        
+        // Auto-start the instance after creation
+        LogInfo("Starting the instance...");
+        StartInstance(name);
     }
 
     /// <summary>
@@ -251,10 +254,14 @@ public class ClawckerService
             // Create and start new container
             LogInfo("Creating and starting container...");
             
+            // Build API key env var based on provider
+            var apiKeyEnv = GetApiKeyEnvVar(instance.Provider, instance.ApiKey);
+            
             var dockerArgs = $"run -d " +
                 $"--name {instance.ContainerName} " +
                 $"--restart unless-stopped " +
                 $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
+                $"{apiKeyEnv}" +
                 $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
                 $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
                 $"-p {instance.Port}:{CONTAINER_PORT} " +
@@ -307,6 +314,154 @@ public class ClawckerService
         {
             LogInfo($"Could not automatically open browser: {ex.Message}");
             LogInfo($"Please manually open: {url}");
+        }
+    }
+
+    /// <summary>
+    /// Configures or reconfigures an OpenClaw instance with a new provider/model
+    /// </summary>
+    public async Task ConfigureInstanceAsync(string name, string? provider = null, string? apiKey = null)
+    {
+        var instance = LoadInstanceMetadata(name);
+        if (instance == null)
+        {
+            throw new InvalidOperationException($"Instance '{name}' not found. Create it first with 'chimpiler clawcker new {name}'");
+        }
+
+        // Prompt for provider if not specified
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            LogInfo("Select AI provider:");
+            LogInfo("  1. Anthropic (Claude)");
+            LogInfo("  2. OpenAI");
+            LogInfo("  3. OpenRouter");
+            LogInfo("  4. Google (Gemini)");
+            LogInfo("");
+            Console.Write("Enter choice [1-4] (default: 1): ");
+            var choice = Console.ReadLine()?.Trim();
+            
+            provider = choice switch
+            {
+                "2" => "openai",
+                "3" => "openrouter",
+                "4" => "gemini",
+                _ => "anthropic"
+            };
+        }
+
+        // Prompt for API key if not specified
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            var providerName = provider switch
+            {
+                "openai" => "OpenAI",
+                "openrouter" => "OpenRouter",
+                "gemini" => "Google Gemini",
+                _ => "Anthropic"
+            };
+            
+            LogInfo("");
+            LogInfo($"Enter your {providerName} API key:");
+            LogInfo($"(You can get one from: {GetProviderUrl(provider)})");
+            Console.Write("API Key: ");
+            apiKey = ReadPassword();
+            
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                throw new InvalidOperationException("API key is required");
+            }
+        }
+
+        LogInfo("");
+        LogInfo($"Configuring instance '{name}' with provider: {GetProviderDisplayName(provider)}");
+
+        // Check if container is running and stop it temporarily
+        var wasRunning = IsContainerRunning(instance.ContainerName);
+        if (wasRunning)
+        {
+            LogInfo("Stopping running instance for reconfiguration...");
+            RunCommand("docker", $"stop {instance.ContainerName}", captureOutput: true);
+        }
+
+        // Remove existing container if it exists
+        if (CheckContainerExists(instance.ContainerName))
+        {
+            RunCommand("docker", $"rm {instance.ContainerName}", captureOutput: true);
+        }
+
+        // Start a temporary container and run the models/auth commands
+        LogInfo("Starting temporary container for configuration...");
+        var dockerArgs = $"run -d " +
+            $"--name {instance.ContainerName}-config " +
+            $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
+            $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
+            $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
+            $"{OPENCLAW_IMAGE} " +
+            $"tail -f /dev/null";
+
+        var runResult = RunCommand("docker", dockerArgs, captureOutput: true);
+        if (runResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException("Failed to start temporary container for configuration");
+        }
+
+        try
+        {
+            await Task.Delay(2000);
+
+            // Determine provider name and model based on provider
+            var (providerName, model) = provider switch
+            {
+                "openai" => ("openai", "openai/gpt-5.2"),
+                "openrouter" => ("openrouter", "openrouter/anthropic/claude-sonnet-4"),
+                "gemini" => ("google-gemini", "google-gemini/gemini-2.5-pro"),
+                _ => ("anthropic", "anthropic/claude-sonnet-4")
+            };
+
+            // Add auth credentials using paste-token with stdin
+            LogInfo("Configuring authentication...");
+            var authArgs = $"exec -i {instance.ContainerName}-config " +
+                $"node /app/dist/entry.js models auth paste-token --provider {providerName}";
+            var authResult = RunCommandWithInput("docker", authArgs, apiKey);
+            if (authResult.ExitCode != 0)
+            {
+                LogInfo("⚠ Auth configuration completed with warnings");
+            }
+
+            // Set the default model
+            LogInfo($"Setting default model to {model}...");
+            var modelArgs = $"exec {instance.ContainerName}-config " +
+                $"node /app/dist/entry.js models set {model}";
+            var modelResult = RunCommand("docker", modelArgs, captureOutput: true);
+            if (modelResult.ExitCode != 0)
+            {
+                LogInfo("⚠ Model configuration completed with warnings");
+            }
+
+            LogInfo("✓ Configuration updated successfully");
+        }
+        finally
+        {
+            // Stop and remove the temporary container
+            RunCommand("docker", $"rm -f {instance.ContainerName}-config", captureOutput: true);
+        }
+
+        // Update instance metadata with new provider/apiKey
+        instance.Provider = provider;
+        instance.ApiKey = apiKey;
+        SaveInstanceMetadata(instance);
+
+        // Restart the instance if it was running before
+        if (wasRunning)
+        {
+            LogInfo("");
+            LogInfo("Restarting instance...");
+            StartInstance(name);
+        }
+        else
+        {
+            LogInfo("");
+            LogInfo($"To start the instance, run: chimpiler clawcker start {name}");
         }
     }
 
@@ -554,6 +709,34 @@ public class ClawckerService
         return (process.ExitCode, output);
     }
 
+    private (int ExitCode, string Output) RunCommandWithInput(string command, string arguments, string input)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = command,
+            Arguments = arguments,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            throw new InvalidOperationException($"Failed to start process: {command}");
+        }
+
+        // Write input and close stdin
+        process.StandardInput.WriteLine(input);
+        process.StandardInput.Close();
+
+        var output = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+        return (process.ExitCode, output);
+    }
+
     private void OpenBrowser(string url)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -674,13 +857,13 @@ public class ClawckerService
             // Wait a moment for container to be ready
             await Task.Delay(2000);
 
-            // Run onboard with the API key
-            var apiKeyArg = provider switch
+            // Run onboard with the API key and set default model for the provider
+            var (apiKeyArg, modelArg) = provider switch
             {
-                "openai" => $"--openai-api-key {apiKey}",
-                "openrouter" => $"--openrouter-api-key {apiKey}",
-                "gemini" => $"--gemini-api-key {apiKey}",
-                _ => $"--anthropic-api-key {apiKey}"
+                "openai" => ($"--openai-api-key {apiKey}", "--model openai/gpt-5.2"),
+                "openrouter" => ($"--openrouter-api-key {apiKey}", "--model openrouter/anthropic/claude-sonnet-4"),
+                "gemini" => ($"--gemini-api-key {apiKey}", "--model google-gemini/gemini-2.5-pro"),
+                _ => ($"--anthropic-api-key {apiKey}", "--model anthropic/claude-sonnet-4")
             };
 
             LogInfo("Configuring OpenClaw with your credentials...");
@@ -691,6 +874,7 @@ public class ClawckerService
                 $"--flow quickstart " +
                 $"--mode local " +
                 $"{apiKeyArg} " +
+                $"{modelArg} " +
                 $"--gateway-port {CONTAINER_PORT} " +
                 $"--gateway-bind lan " +
                 $"--gateway-auth token " +
@@ -762,6 +946,22 @@ public class ClawckerService
             "gemini" => "Google Gemini",
             _ => "Anthropic (Claude)"
         };
+    }
+
+    private string GetApiKeyEnvVar(string? provider, string? apiKey)
+    {
+        if (string.IsNullOrEmpty(apiKey))
+            return "";
+            
+        var envVarName = provider switch
+        {
+            "openai" => "OPENAI_API_KEY",
+            "openrouter" => "OPENROUTER_API_KEY",
+            "gemini" => "GOOGLE_API_KEY",
+            _ => "ANTHROPIC_API_KEY"
+        };
+        
+        return $"-e {envVarName}={apiKey} ";
     }
 
     #endregion
