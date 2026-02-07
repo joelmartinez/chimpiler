@@ -380,13 +380,21 @@ public class ClawckerService
         if (wasRunning)
         {
             LogInfo("Stopping running instance for reconfiguration...");
-            RunCommand("docker", $"stop {instance.ContainerName}", captureOutput: true);
+            var stopResult = RunCommand("docker", $"stop {instance.ContainerName}", captureOutput: true);
+            if (stopResult.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"Failed to stop container '{instance.ContainerName}'. {stopResult.Output}");
+            }
         }
 
         // Remove existing container if it exists
         if (CheckContainerExists(instance.ContainerName))
         {
-            RunCommand("docker", $"rm {instance.ContainerName}", captureOutput: true);
+            var rmResult = RunCommand("docker", $"rm {instance.ContainerName}", captureOutput: true);
+            if (rmResult.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"Failed to remove container '{instance.ContainerName}'. {rmResult.Output}");
+            }
         }
 
         // Start a temporary container and run the models/auth commands
