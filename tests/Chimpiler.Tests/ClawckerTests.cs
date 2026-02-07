@@ -186,6 +186,178 @@ public class ClawckerServiceTests : IDisposable
         Assert.False(isHealthy);
     }
 
+    [Fact]
+    public async Task ConfigureInstanceAsync_ForNonExistentInstance_ShouldThrowInvalidOperationException()
+    {
+        // Act & Assert
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await _service.ConfigureInstanceAsync("non-existent", "anthropic", "test-key"));
+        Assert.Contains("not found", ex.Message);
+    }
+
+    [Fact]
+    public async Task ConfigureInstanceAsync_WithValidProviderAndKey_ShouldUpdateMetadata()
+    {
+        // Skip this test if Docker is not available
+        if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
+        {
+            return;
+        }
+
+        // Arrange
+        var instanceName = "test-configure-metadata";
+        
+        try
+        {
+            // Create instance first
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "initial-key");
+            
+            // Act - Reconfigure with new provider and key
+            await _service.ConfigureInstanceAsync(instanceName, "openai", "new-openai-key");
+            
+            // Assert - Verify metadata was updated
+            var instances = _service.ListInstances();
+            var instance = instances.FirstOrDefault(i => i.Name == instanceName);
+            
+            Assert.NotNull(instance);
+            Assert.Equal("openai", instance.Provider);
+            Assert.Equal("new-openai-key", instance.ApiKey);
+        }
+        finally
+        {
+            CleanupInstance(instanceName);
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureInstanceAsync_WhenInstanceIsRunning_ShouldStopAndRestart()
+    {
+        // Skip this test if Docker is not available
+        if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
+        {
+            return;
+        }
+
+        // Arrange
+        var instanceName = "test-configure-running";
+        
+        try
+        {
+            // Create and start instance
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "test-key");
+            _service.StartInstance(instanceName);
+            
+            // Wait a moment for container to start
+            await Task.Delay(3000);
+            
+            // Verify it's running
+            var statusBefore = _service.GetInstanceStatus(instanceName);
+            Assert.Contains("running", statusBefore.ToLower());
+            
+            // Act - Reconfigure the running instance
+            await _service.ConfigureInstanceAsync(instanceName, "openai", "new-key");
+            
+            // Assert - Instance should be running again after reconfiguration
+            await Task.Delay(3000); // Give it time to restart
+            var statusAfter = _service.GetInstanceStatus(instanceName);
+            Assert.Contains("running", statusAfter.ToLower());
+            
+            // Verify metadata was updated
+            var instances = _service.ListInstances();
+            var instance = instances.FirstOrDefault(i => i.Name == instanceName);
+            Assert.NotNull(instance);
+            Assert.Equal("openai", instance.Provider);
+        }
+        finally
+        {
+            CleanupInstance(instanceName);
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureInstanceAsync_WhenInstanceIsStopped_ShouldNotRestart()
+    {
+        // Skip this test if Docker is not available
+        if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
+        {
+            return;
+        }
+
+        // Arrange
+        var instanceName = "test-configure-stopped";
+        
+        try
+        {
+            // Create instance (which auto-starts it)
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "test-key");
+            
+            // Stop the instance
+            _service.StopInstance(instanceName);
+            await Task.Delay(2000); // Give it time to stop
+            
+            // Verify it's not running
+            var statusBefore = _service.GetInstanceStatus(instanceName);
+            Assert.DoesNotContain("running", statusBefore.ToLower());
+            
+            // Act - Configure the stopped instance
+            await _service.ConfigureInstanceAsync(instanceName, "gemini", "gemini-key");
+            
+            // Assert - Instance should still be stopped
+            var statusAfter = _service.GetInstanceStatus(instanceName);
+            Assert.DoesNotContain("running", statusAfter.ToLower());
+            
+            // Verify metadata was updated
+            var instances = _service.ListInstances();
+            var instance = instances.FirstOrDefault(i => i.Name == instanceName);
+            Assert.NotNull(instance);
+            Assert.Equal("gemini", instance.Provider);
+            Assert.Equal("gemini-key", instance.ApiKey);
+        }
+        finally
+        {
+            CleanupInstance(instanceName);
+        }
+    }
+
+    [Fact]
+    public async Task ConfigureInstanceAsync_WithDifferentProviders_ShouldPersistCorrectly()
+    {
+        // Skip this test if Docker is not available
+        if (!_service.IsDockerAvailable() || !_service.IsDockerRunning())
+        {
+            return;
+        }
+
+        // Arrange
+        var instanceName = "test-configure-providers";
+        var providers = new[] { "anthropic", "openai", "openrouter", "gemini" };
+        
+        try
+        {
+            // Create instance
+            await _service.CreateInstanceAsync(instanceName, "anthropic", "initial-key");
+            
+            // Act & Assert - Test each provider
+            foreach (var provider in providers)
+            {
+                var apiKey = $"{provider}-test-key-{Guid.NewGuid()}";
+                await _service.ConfigureInstanceAsync(instanceName, provider, apiKey);
+                
+                // Verify metadata persistence
+                var instances = _service.ListInstances();
+                var instance = instances.FirstOrDefault(i => i.Name == instanceName);
+                
+                Assert.NotNull(instance);
+                Assert.Equal(provider, instance.Provider);
+                Assert.Equal(apiKey, instance.ApiKey);
+            }
+        }
+        finally
+        {
+            CleanupInstance(instanceName);
+        }
+    }
+
     private void CleanupInstance(string name)
     {
         try
