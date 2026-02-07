@@ -728,13 +728,24 @@ public class ClawckerService
             throw new InvalidOperationException($"Failed to start process: {command}");
         }
 
+        // Begin reading stdout and stderr asynchronously to avoid deadlocks
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+
         // Write input and close stdin
         process.StandardInput.WriteLine(input);
         process.StandardInput.Close();
 
-        var output = process.StandardOutput.ReadToEnd();
         process.WaitForExit();
-        return (process.ExitCode, output);
+
+        var stdout = stdoutTask.Result;
+        var stderr = stderrTask.Result;
+
+        var combinedOutput = string.IsNullOrEmpty(stderr)
+            ? stdout
+            : (string.IsNullOrEmpty(stdout) ? stderr : stdout + Environment.NewLine + stderr);
+
+        return (process.ExitCode, combinedOutput);
     }
 
     private void OpenBrowser(string url)
