@@ -1,107 +1,101 @@
-# ef-migrate
+EF-MIGRATE - Generate DACPACs from EF Core DbContext
+================================================================================
 
-Generate DACPACs from EF Core DbContext models.
+Generate DACPAC files from Entity Framework Core DbContext models without
+requiring a live database connection, existing migrations, or manual SQL.
 
-## Description
+USAGE
+  $ chimpiler ef-migrate --assembly <path> [options]
 
-The `ef-migrate` command generates one or more DACPAC files from Entity Framework Core DbContext models defined in a compiled .NET assembly. Each DbContext represents a distinct database, and the tool emits **one DACPAC per DbContext** without requiring:
+OPTIONS
+--------------------------------------------------------------------------------
 
-- A live database connection
-- Existing EF Core migrations
-- Manual SQL scripting
-- Database import/export workflows
+Required:
+  -a, --assembly <path>     Path to compiled .NET assembly with DbContext types
 
-## Usage
+Optional:
+  -c, --context <name>      Fully qualified DbContext type name (default: all)
+  -o, --output <folder>     Output directory (default: ./output)
+  -v, --verbose             Enable detailed logging
+  -h, --help                Show help
 
-```bash
-chimpiler ef-migrate --assembly <path> [options]
-```
+EXAMPLES
+--------------------------------------------------------------------------------
 
-## Options
+  Generate DACPACs for all DbContexts:
+    $ chimpiler ef-migrate -a path/to/YourApp.dll
 
-### Required
+  Generate for a specific DbContext:
+    $ chimpiler ef-migrate -a path/to/YourApp.dll -c YourNamespace.OrdersDbContext
 
-- `-a, --assembly <path>` - Path to a compiled .NET assembly containing one or more EF Core DbContext types
+  Custom output with verbose logging:
+    $ chimpiler ef-migrate -a path/to/YourApp.dll -o ./dacpacs -v
 
-### Optional
+DACPAC NAMING
+--------------------------------------------------------------------------------
 
-- `-c, --context <Fully.Qualified.TypeName>` - Fully qualified type name of a specific DbContext. If omitted, all DbContexts will be processed
-- `-o, --output <folder>` - Output directory for generated DACPACs (default: `./output`)
-- `-v, --verbose` - Enable detailed logging
-- `-h, --help` - Show help information
+Files are named based on the DbContext type:
 
-## Examples
+  1. Strip 'DbContext' suffix if present
+  2. Strip 'Context' suffix if present
+  3. Append '.dacpac'
 
-Generate DACPACs for all DbContexts in an assembly:
+  TheDatabaseContext  ->  TheDatabase.dacpac
+  OrdersDbContext     ->  Orders.dacpac
+  ReportingContext    ->  Reporting.dacpac
 
-```bash
-chimpiler ef-migrate --assembly path/to/YourApp.dll
-```
+SUPPORTED EF CORE FEATURES
+--------------------------------------------------------------------------------
 
-Generate a DACPAC for a specific DbContext:
+Supported:
+  [x] Tables, columns, data types
+  [x] Primary keys (simple and composite)
+  [x] Foreign keys and relationships
+  [x] Indexes (unique and non-unique)
+  [x] Schemas (including custom schemas)
+  [x] Column nullability and max length
+  [x] Identity columns
+  [x] Decimal precision
+  [x] Delete behaviors (Cascade, SetNull, Restrict)
 
-```bash
-chimpiler ef-migrate --assembly path/to/YourApp.dll --context YourNamespace.OrdersDbContext
-```
+Not yet supported:
+  [ ] Temporal tables
+  [ ] Memory-optimized tables
+  [ ] Computed columns
+  [ ] Check constraints
+  [ ] Default constraints
+  [ ] Filtered indexes
+  [ ] Stored procedures, functions, views, triggers
+  [ ] Full-text indexes
+  [ ] Service Broker objects
+  [ ] CLR types
+  [ ] Row-level security
 
-Custom output directory with verbose logging:
+HOW IT WORKS
+--------------------------------------------------------------------------------
 
-```bash
-chimpiler ef-migrate --assembly path/to/YourApp.dll --output ./dacpacs --verbose
-```
+  1. Assembly Loading
+     Loads the target assembly via reflection
 
-## DACPAC Naming
+  2. DbContext Discovery
+     Finds all types inheriting from DbContext
 
-DACPAC files are named based on the DbContext type name:
+  3. Model Extraction
+     For each DbContext:
+       - Instantiates the context
+       - Builds the EF Core runtime model
+       - Extracts relational metadata (tables, columns, keys, indexes)
 
-1. Strip the `DbContext` suffix if present
-2. Strip the `Context` suffix if present
-3. Append `.dacpac`
+  4. DACPAC Generation
+     Translates EF Core model to SQL Server schema using DacFx APIs
 
-Examples:
-- `TheDatabaseContext` → `TheDatabase.dacpac`
-- `OrdersDbContext` → `Orders.dacpac`
-- `ReportingContext` → `Reporting.dacpac`
+  5. File Output
+     Writes each DACPAC to the output directory
 
-## Supported EF Core Features
+NOTES
+--------------------------------------------------------------------------------
 
-✅ **Supported:**
-- Tables, columns, data types
-- Primary keys (simple and composite)
-- Foreign keys and relationships
-- Indexes (unique and non-unique)
-- Schemas (including custom schemas)
-- Column nullability and max length
-- Identity columns
-- Decimal precision
-- Delete behaviors (Cascade, SetNull, Restrict)
-
-⚠️ **Not Yet Supported:**
-- Temporal tables
-- Memory-optimized tables
-- Computed columns
-- Check constraints
-- Default constraints
-- Filtered indexes
-- Stored procedures, functions, views, triggers
-- Full-text indexes
-- Service Broker objects
-- CLR types
-- Row-level security
-
-## How It Works
-
-1. **Assembly Loading** - Loads the target assembly via reflection
-2. **DbContext Discovery** - Discovers all types inheriting from `DbContext`
-3. **Model Extraction** - For each DbContext:
-   - Instantiates the context
-   - Builds the EF Core runtime model
-   - Extracts relational metadata (tables, columns, keys, indexes, schemas)
-4. **DACPAC Generation** - Translates the EF Core model into SQL Server schema objects using DacFx APIs
-5. **File Output** - Writes each DACPAC to the output directory
-
-## Notes
-
-- No live SQL Server connection is required
-- The DbContext must have a parameterless constructor or configure `OnConfiguring`
-- Generated DACPACs are compatible with SqlPackage and Azure DevOps deployment pipelines
+  - No live SQL Server connection required
+  - DbContext must have parameterless constructor or configure OnConfiguring
+  - Generated DACPACs work with SqlPackage and Azure DevOps pipelines
+  - One DACPAC per DbContext
