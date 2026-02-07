@@ -9,6 +9,20 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
+        // Handle bare --help or -h at root level with custom help
+        if (args.Length == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "-?"))
+        {
+            ShowGeneralHelp();
+            return 0;
+        }
+
+        // Handle "help subcommand" pattern for subcommand --help
+        if (args.Length == 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "-?"))
+        {
+            ShowSubcommandHelp(args[0]);
+            return 0;
+        }
+
         var rootCommand = new RootCommand("Chimpiler - A multi-purpose CLI tooling ecosystem");
 
         // Create the ef-migrate command
