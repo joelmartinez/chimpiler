@@ -199,6 +199,9 @@ DACPAC files are named based on the DbContext type name with the following rules
 - Identity columns
 - Decimal precision
 - Delete behaviors (Cascade, SetNull, Restrict)
+- **Views (simple and indexed views with SCHEMABINDING)**
+- **View column renames and projections**
+- **View JOINs across multiple tables**
 
 ⚠️ **Not Yet Supported:**
 - Temporal tables
@@ -209,12 +212,116 @@ DACPAC files are named based on the DbContext type name with the following rules
 - Filtered indexes
 - Stored procedures
 - Functions
-- Views
 - Triggers
 - Full-text indexes
 - Service Broker objects
 - CLR types
 - Row-level security
+
+## Working with Views
+
+The `ef-migrate` tool now supports SQL Server views, including indexed views. To use views, install the `Chimpiler.EfMigrate` package in your DbContext project:
+
+```bash
+dotnet add package Chimpiler.EfMigrate
+```
+
+### Defining Views
+
+Views are defined using a fluent API in your `OnModelCreating` method:
+
+```csharp
+using Chimpiler.EfMigrate;
+
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    // Simple view over a single table
+    modelBuilder.Entity<UserSummaryView>(entity =>
+    {
+        entity.ToView("UserSummaryView")
+              .HasViewDefinition<UserSummaryView, MyDbContext>(ctx =>
+                  from u in ctx.Users
+                  select new UserSummaryView
+                  {
+                      Id = u.Id,
+                      FullName = u.FirstName + " " + u.LastName,
+                      Email = u.Email
+                  });
+        
+        entity.HasKey(e => e.Id);
+    });
+
+    // Indexed view with SCHEMABINDING
+    modelBuilder.Entity<ActiveOrdersView>(entity =>
+    {
+        entity.ToView("ActiveOrdersView")
+              .HasViewDefinition<ActiveOrdersView, MyDbContext>(ctx =>
+                  from o in ctx.Orders
+                  where o.Status == "Active"
+                  select new ActiveOrdersView
+                  {
+                      OrderId = o.Id,
+                      CustomerName = o.CustomerName,
+                      TotalAmount = o.TotalAmount
+                  })
+              .WithSchemaBinding()
+              .HasClusteredIndex(v => v.OrderId);
+        
+        entity.HasKey(e => e.OrderId);
+    });
+
+    // View with JOIN
+    modelBuilder.Entity<OrderDetailsView>(entity =>
+    {
+        entity.ToView("OrderDetailsView")
+              .HasViewDefinition<OrderDetailsView, MyDbContext>(ctx =>
+                  from o in ctx.Orders
+                  join c in ctx.Customers on o.CustomerId equals c.Id
+                  select new OrderDetailsView
+                  {
+                      OrderId = o.Id,
+                      CustomerName = c.Name,
+                      CustomerEmail = c.Email,
+                      TotalAmount = o.TotalAmount
+                  });
+        
+        entity.HasKey(e => e.OrderId);
+    });
+}
+```
+
+### View Features
+
+- **LINQ-to-SQL Translation**: View definitions use standard LINQ queries that are automatically converted to SQL via EF Core's `ToQueryString()` method
+- **Column Renaming**: Map source columns to different names in your view entity
+- **Indexed Views**: Use `.WithSchemaBinding()` and `.HasClusteredIndex()` for SQL Server indexed views
+- **JOINs**: Views can join multiple tables using standard LINQ join syntax
+- **Type Safety**: The compiler validates your view definitions and catches errors at build time
+
+### Escape Hatch for Complex Views
+
+For views that can't be expressed in LINQ (e.g., CTEs, window functions), use raw SQL:
+
+```csharp
+entity.ToView("ComplexView")
+      .HasViewSql(@"
+          WITH SalesCTE AS (
+              SELECT ProductId, SUM(Quantity) as TotalSales
+              FROM OrderItems
+              GROUP BY ProductId
+          )
+          SELECT p.Id, p.Name, COALESCE(s.TotalSales, 0) as TotalSales
+          FROM Products p
+          LEFT JOIN SalesCTE s ON p.Id = s.ProductId
+      ");
+```
+
+### Important Notes
+
+- Views are created **after** tables in the DACPAC, ensuring proper dependencies
+- EF Core must be able to translate your LINQ query to SQL - complex expressions may not be supported
+- For SCHEMABINDING views, table references are automatically qualified with schema names
+- The first index on an indexed view must be a unique clustered index
 
 These limitations are documented and may be addressed in future releases.
 
