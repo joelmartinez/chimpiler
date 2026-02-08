@@ -165,28 +165,6 @@ public class ViewSqlGenerator
         }, RegexOptions.IgnoreCase);
     }
 
-    private string? GenerateClusteredIndexDdl(IEntityType entityType, string schema, string viewName)
-    {
-        var indexExpression = entityType.FindAnnotation(ViewAnnotations.ClusteredIndexExpression)?.Value;
-        if (indexExpression == null)
-        {
-            return null;
-        }
-
-        // Parse the expression to get column names
-        var columns = ParseIndexExpression(indexExpression, entityType);
-        if (columns.Count == 0)
-        {
-            Log($"Warning: Could not parse clustered index expression for view {viewName}");
-            return null;
-        }
-
-        var indexName = $"UCIX_{viewName}_{string.Join("_", columns)}";
-        var columnList = string.Join(", ", columns.Select(c => $"[{c}]"));
-
-        return $"CREATE UNIQUE CLUSTERED INDEX [{indexName}] ON [{schema}].[{viewName}] ({columnList})";
-    }
-
     private List<string> ParseIndexExpression(object expression, IEntityType entityType)
     {
         var columns = new List<string>();
