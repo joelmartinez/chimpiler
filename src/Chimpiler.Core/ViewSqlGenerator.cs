@@ -70,6 +70,39 @@ public class ViewSqlGenerator
         return GenerateViewDdlFromSql(entityType, schema, viewName, viewSql);
     }
 
+    /// <summary>
+    /// Generates CREATE INDEX DDL for a view's clustered index (if specified)
+    /// </summary>
+    public string? GenerateClusteredIndexDdl(IEntityType entityType)
+    {
+        var viewName = entityType.GetViewName();
+        var schema = entityType.GetViewSchema() ?? entityType.GetSchema() ?? "dbo";
+
+        if (string.IsNullOrEmpty(viewName))
+        {
+            return null;
+        }
+
+        var indexExpression = entityType.FindAnnotation(ViewAnnotations.ClusteredIndexExpression)?.Value;
+        if (indexExpression == null)
+        {
+            return null;
+        }
+
+        // Parse the expression to get column names
+        var columns = ParseIndexExpression(indexExpression, entityType);
+        if (columns.Count == 0)
+        {
+            Log($"Warning: Could not parse clustered index expression for view {viewName}");
+            return null;
+        }
+
+        var indexName = $"UCIX_{viewName}_{string.Join("_", columns)}";
+        var columnList = string.Join(", ", columns.Select(c => $"[{c}]"));
+
+        return $"CREATE UNIQUE CLUSTERED INDEX [{indexName}] ON [{schema}].[{viewName}] ({columnList})";
+    }
+
     private string GenerateViewDdlFromRawSql(IEntityType entityType, string schema, string viewName, string sql)
     {
         var sb = new StringBuilder();
@@ -83,15 +116,7 @@ public class ViewSqlGenerator
             sb.AppendLine("WITH SCHEMABINDING");
         }
         sb.AppendLine("AS");
-        sb.AppendLine(sql);
-
-        // Add clustered index if specified
-        var clusteredIndexDdl = GenerateClusteredIndexDdl(entityType, schema, viewName);
-        if (!string.IsNullOrEmpty(clusteredIndexDdl))
-        {
-            sb.AppendLine();
-            sb.AppendLine(clusteredIndexDdl);
-        }
+        sb.Append(sql); // Don't add a final newline
 
         return sb.ToString();
     }
@@ -118,15 +143,7 @@ public class ViewSqlGenerator
             sql = EnsureSchemaQualifiedTableNames(sql);
         }
         
-        sb.AppendLine(sql);
-
-        // Add clustered index if specified
-        var clusteredIndexDdl = GenerateClusteredIndexDdl(entityType, schema, viewName);
-        if (!string.IsNullOrEmpty(clusteredIndexDdl))
-        {
-            sb.AppendLine();
-            sb.AppendLine(clusteredIndexDdl);
-        }
+        sb.Append(sql); // Don't add a final newline
 
         return sb.ToString();
     }
@@ -233,22 +250,56 @@ public class ViewSqlGenerator
                 throw new InvalidOperationException("Lambda returned null");
             }
 
-            // In EF Core 10, ToQueryString is an instance method on IQueryable
-            var toQueryStringMethod = queryable.GetType().GetMethod("ToQueryString", BindingFlags.Public | BindingFlags.Instance);
+            // Use the EntityFrameworkQueryableExtensions.ToQueryString method
+            // This is available in EF Core and works on IQueryable<T>
+            var queryableType = queryable.GetType();
             
-            if (toQueryStringMethod == null)
+            // Find the ToQueryString method - it's an instance method in EF Core 5+
+            var toQueryStringMethod = queryableType.GetMethod("ToQueryString", 
+                BindingFlags.Public | BindingFlags.Instance, 
+                null, 
+                Type.EmptyTypes, 
+                null);
+            
+            if (toQueryStringMethod != null)
             {
-                throw new InvalidOperationException("Could not find ToQueryString method on IQueryable");
+                // EF Core 5+ - ToQueryString is an instance method
+                var sql = toQueryStringMethod.Invoke(queryable, null) as string;
+                if (!string.IsNullOrEmpty(sql))
+                {
+                    return sql;
+                }
             }
 
-            var sql = toQueryStringMethod.Invoke(queryable, null) as string;
-
-            if (string.IsNullOrEmpty(sql))
+            // If instance method not found, try extension method approach
+            // Find EntityFrameworkQueryableExtensions.ToQueryString
+            var efAssembly = typeof(DbContext).Assembly;
+            var extensionsType = efAssembly.GetTypes()
+                .FirstOrDefault(t => t.Name == "EntityFrameworkQueryableExtensions" || 
+                                   t.Name == "RelationalQueryableExtensions");
+            
+            if (extensionsType != null)
             {
-                throw new InvalidOperationException("ToQueryString returned null or empty SQL");
+                var extensionMethod = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                    .FirstOrDefault(m => m.Name == "ToQueryString" && m.GetParameters().Length == 1);
+                
+                if (extensionMethod != null)
+                {
+                    // Make it generic if needed
+                    if (extensionMethod.IsGenericMethodDefinition)
+                    {
+                        extensionMethod = extensionMethod.MakeGenericMethod(entityType.ClrType);
+                    }
+                    
+                    var sql = extensionMethod.Invoke(null, new[] { queryable }) as string;
+                    if (!string.IsNullOrEmpty(sql))
+                    {
+                        return sql;
+                    }
+                }
             }
 
-            return sql;
+            throw new InvalidOperationException("Could not find ToQueryString method");
         }
         catch (Exception ex)
         {

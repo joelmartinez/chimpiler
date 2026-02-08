@@ -265,15 +265,29 @@ public class DacpacGenerator
             var viewName = view.GetViewName();
             Log($"  Creating view: {viewName}");
 
+            string? viewDdl = null;
             try
             {
-                var viewDdl = viewGenerator.GenerateViewDdl(view, context);
+                viewDdl = viewGenerator.GenerateViewDdl(view, context);
+                Log($"Generated view DDL for {viewName}:\n{viewDdl}");
                 model.AddObjects(viewDdl);
+                
+                // Create clustered index separately if needed
+                var indexDdl = viewGenerator.GenerateClusteredIndexDdl(view);
+                if (!string.IsNullOrEmpty(indexDdl))
+                {
+                    Log($"Generated index DDL for {viewName}:\n{indexDdl}");
+                    model.AddObjects(indexDdl);
+                }
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException(
-                    $"Failed to generate view {viewName}: {ex.Message}", ex);
+                var errorMsg = $"Failed to generate view {viewName}: {ex.Message}";
+                if (viewDdl != null)
+                {
+                    errorMsg += $"\nGenerated SQL was:\n{viewDdl}";
+                }
+                throw new InvalidOperationException(errorMsg, ex);
             }
         }
     }

@@ -231,6 +231,64 @@ public class DacpacGeneratorTests : IDisposable
         var primaryKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.PrimaryKeyConstraint);
         Assert.NotEmpty(primaryKeys);
     }
+
+    [Fact]
+    public void GenerateDacpac_ForContextWithViews_ShouldCreateTablesAndViews()
+    {
+        // Arrange
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "Participants.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(ParticipantsDbContext), outputPath);
+
+        // Print logs for debugging
+        foreach (var log in logMessages)
+        {
+            Console.WriteLine(log);
+        }
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+        
+        // Verify it's a valid DACPAC
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        // Verify tables were created
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table);
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "StudyEnrollments"));
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "ParticipantProfiles"));
+
+        // Verify views were created
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View);
+        Assert.NotEmpty(views);
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "SimpleStudyView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "DeidentifiedStudyEnrollmentView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "DeidentifiedParticipantProfileView"));
+    }
+
+    [Fact]
+    public void GenerateDacpac_ForViewWithSchemaBinding_ShouldIncludeSchemaBindingAndIndex()
+    {
+        // Arrange
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "Participants.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(ParticipantsDbContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+        
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        
+        // Verify the indexed view has a clustered index
+        var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index);
+        Assert.Contains(indexes, idx => 
+            idx.Name.Parts.Any(p => p.Contains("DeidentifiedStudyEnrollmentView")));
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable
