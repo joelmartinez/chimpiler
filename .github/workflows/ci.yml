@@ -34,8 +34,20 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
     
-    - name: Build
-      run: dotnet build --no-restore --configuration Release
+    - name: Build Chimpiler CLI tool
+      run: dotnet build src/Chimpiler/Chimpiler.csproj --no-restore --configuration Release /p:Version=${{ steps.version.outputs.cli_full_version }}
+    
+    - name: Build Chimpiler.EfMigrate library
+      run: dotnet build src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj --no-restore --configuration Release /p:Version=${{ steps.version.outputs.lib_full_version }}
+    
+    - name: Build Chimpiler.Core
+      run: dotnet build src/Chimpiler.Core/Chimpiler.Core.csproj --no-restore --configuration Release
+    
+    - name: Build Chimpiler.TestFixtures
+      run: dotnet build tests/Chimpiler.TestFixtures/Chimpiler.TestFixtures.csproj --no-restore --configuration Release
+    
+    - name: Build Chimpiler.Tests
+      run: dotnet build tests/Chimpiler.Tests/Chimpiler.Tests.csproj --no-restore --configuration Release
     
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
