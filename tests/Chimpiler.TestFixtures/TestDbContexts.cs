@@ -210,75 +210,75 @@ public class InventoryItem
 /// <summary>
 /// Test database with views - includes simple view, view with column rename, and indexed view
 /// </summary>
-public class ParticipantsDbContext : DbContext
+public class LibraryContext : DbContext
 {
-    public DbSet<StudyEnrollment> StudyEnrollments { get; set; } = null!;
-    public DbSet<ParticipantProfile> ParticipantProfiles { get; set; } = null!;
+    public DbSet<Book> Books { get; set; } = null!;
+    public DbSet<Author> Authors { get; set; } = null!;
     
     // Views
-    public DbSet<DeidentifiedStudyEnrollmentView> DeidentifiedStudyEnrollmentView { get; set; } = null!;
-    public DbSet<DeidentifiedParticipantProfileView> DeidentifiedParticipantProfileView { get; set; } = null!;
-    public DbSet<SimpleStudyView> SimpleStudyView { get; set; } = null!;
+    public DbSet<BookSummaryView> BookSummaryView { get; set; } = null!;
+    public DbSet<BookAuthorView> BookAuthorView { get; set; } = null!;
+    public DbSet<SimpleBookView> SimpleBookView { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ParticipantsDb;Trusted_Connection=True;");
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=LibraryDb;Trusted_Connection=True;");
         }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Tables
-        modelBuilder.Entity<StudyEnrollment>(entity =>
+        modelBuilder.Entity<Book>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.StudyId).IsRequired();
-            entity.Property(e => e.ParticipantId).IsRequired();
-            entity.Property(e => e.ParticipantName).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.EnrolledAtUtc).IsRequired();
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.ISBN).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.AuthorId).IsRequired();
+            entity.Property(e => e.PublishedYear);
+            entity.Property(e => e.Genre).HasMaxLength(50);
         });
 
-        modelBuilder.Entity<ParticipantProfile>(entity =>
+        modelBuilder.Entity<Author>(entity =>
         {
-            entity.HasKey(e => e.ParticipantId);
+            entity.HasKey(e => e.AuthorId);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
             entity.Property(e => e.BirthYear);
-            entity.Property(e => e.AssignedSex).HasMaxLength(10);
-            entity.Property(e => e.GenderIdentity).HasMaxLength(50);
-            entity.Property(e => e.TrackedIllnesses).HasMaxLength(500);
+            entity.Property(e => e.Country).HasMaxLength(50);
+            entity.Property(e => e.Biography).HasMaxLength(1000);
         });
 
         // Simple view over single table (no column renames)
-        modelBuilder.Entity<SimpleStudyView>(entity =>
+        modelBuilder.Entity<SimpleBookView>(entity =>
         {
-            entity.ToView("SimpleStudyView")
-                  .HasViewDefinition<SimpleStudyView, ParticipantsDbContext>(ctx =>
-                      from se in ctx.StudyEnrollments
-                      select new SimpleStudyView
+            entity.ToView("SimpleBookView")
+                  .HasViewDefinition<SimpleBookView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      select new SimpleBookView
                       {
-                          Id = se.Id,
-                          StudyId = se.StudyId,
-                          EnrolledAtUtc = se.EnrolledAtUtc
+                          Id = b.Id,
+                          Title = b.Title,
+                          PublishedYear = b.PublishedYear
                       });
             
             entity.HasKey(e => e.Id);
         });
 
-        // View with column rename - ParticipantName becomes StudyScopedParticipantId
-        modelBuilder.Entity<DeidentifiedStudyEnrollmentView>(entity =>
+        // View with column rename - ISBN becomes BookCode
+        modelBuilder.Entity<BookSummaryView>(entity =>
         {
-            entity.ToView("DeidentifiedStudyEnrollmentView")
-                  .HasViewDefinition<DeidentifiedStudyEnrollmentView, ParticipantsDbContext>(ctx =>
-                      from se in ctx.StudyEnrollments
-                      select new DeidentifiedStudyEnrollmentView
+            entity.ToView("BookSummaryView")
+                  .HasViewDefinition<BookSummaryView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      select new BookSummaryView
                       {
-                          Id = se.Id,
-                          StudyId = se.StudyId,
-                          StudyScopedParticipantId = se.ParticipantName,
-                          EnrolledAtUtc = se.EnrolledAtUtc,
-                          WithdrawnAtUtc = se.WithdrawnAtUtc,
-                          CompletedAtUtc = se.CompletedAtUtc
+                          Id = b.Id,
+                          Title = b.Title,
+                          BookCode = b.ISBN,
+                          PublishedYear = b.PublishedYear,
+                          Genre = b.Genre
                       })
                   .WithSchemaBinding()
                   .HasClusteredIndex(v => v.Id);
@@ -287,74 +287,70 @@ public class ParticipantsDbContext : DbContext
         });
 
         // View with JOIN
-        modelBuilder.Entity<DeidentifiedParticipantProfileView>(entity =>
+        modelBuilder.Entity<BookAuthorView>(entity =>
         {
-            entity.ToView("DeidentifiedParticipantProfileView")
-                  .HasViewDefinition<DeidentifiedParticipantProfileView, ParticipantsDbContext>(ctx =>
-                      from se in ctx.StudyEnrollments
-                      join pp in ctx.ParticipantProfiles on se.ParticipantId equals pp.ParticipantId
-                      select new DeidentifiedParticipantProfileView
+            entity.ToView("BookAuthorView")
+                  .HasViewDefinition<BookAuthorView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      join a in ctx.Authors on b.AuthorId equals a.AuthorId
+                      select new BookAuthorView
                       {
-                          StudyId = se.StudyId,
-                          StudyScopedParticipantId = se.ParticipantName,
-                          BirthYear = pp.BirthYear,
-                          AssignedSex = pp.AssignedSex,
-                          GenderIdentity = pp.GenderIdentity,
-                          TrackedIllnesses = pp.TrackedIllnesses
+                          BookId = b.Id,
+                          Title = b.Title,
+                          AuthorName = a.Name,
+                          Country = a.Country,
+                          PublishedYear = b.PublishedYear
                       });
             
             // Composite key for this view
-            entity.HasKey(e => new { e.StudyId, e.StudyScopedParticipantId });
+            entity.HasKey(e => new { e.BookId, e.Title });
         });
     }
 }
 
 // Table entities
-public class StudyEnrollment
+public class Book
 {
     public int Id { get; set; }
-    public int StudyId { get; set; }
-    public int ParticipantId { get; set; }
-    public string ParticipantName { get; set; } = string.Empty;
-    public DateTime EnrolledAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string ISBN { get; set; } = string.Empty;
+    public int AuthorId { get; set; }
+    public int? PublishedYear { get; set; }
+    public string? Genre { get; set; }
 }
 
-public class ParticipantProfile
+public class Author
 {
-    public int ParticipantId { get; set; }
+    public int AuthorId { get; set; }
+    public string Name { get; set; } = string.Empty;
     public int? BirthYear { get; set; }
-    public string? AssignedSex { get; set; }
-    public string? GenderIdentity { get; set; }
-    public string? TrackedIllnesses { get; set; }
+    public string? Country { get; set; }
+    public string? Biography { get; set; }
 }
 
 // View entities
-public class SimpleStudyView
+public class SimpleBookView
 {
     public int Id { get; set; }
-    public int StudyId { get; set; }
-    public DateTime EnrolledAtUtc { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int? PublishedYear { get; set; }
 }
 
-public class DeidentifiedStudyEnrollmentView
+public class BookSummaryView
 {
     public int Id { get; set; }
-    public int StudyId { get; set; }
-    public string StudyScopedParticipantId { get; set; } = string.Empty;
-    public DateTime EnrolledAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string BookCode { get; set; } = string.Empty;
+    public int? PublishedYear { get; set; }
+    public string? Genre { get; set; }
 }
 
-public class DeidentifiedParticipantProfileView
+public class BookAuthorView
 {
-    public int StudyId { get; set; }
-    public string StudyScopedParticipantId { get; set; } = string.Empty;
-    public int? BirthYear { get; set; }
-    public string? AssignedSex { get; set; }
-    public string? GenderIdentity { get; set; }
-    public string? TrackedIllnesses { get; set; }
+    public int BookId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string AuthorName { get; set; } = string.Empty;
+    public string? Country { get; set; }
+    public int? PublishedYear { get; set; }
 }
 

@@ -238,10 +238,10 @@ public class DacpacGeneratorTests : IDisposable
         // Arrange
         var logMessages = new List<string>();
         var generator = new DacpacGenerator(msg => logMessages.Add(msg));
-        var outputPath = Path.Combine(_tempOutputDir, "Participants.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Library.dacpac");
 
         // Act
-        generator.GenerateDacpac(typeof(ParticipantsDbContext), outputPath);
+        generator.GenerateDacpac(typeof(LibraryContext), outputPath);
 
         // Print logs for debugging
         foreach (var log in logMessages)
@@ -258,15 +258,15 @@ public class DacpacGeneratorTests : IDisposable
 
         // Verify tables were created
         var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table);
-        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "StudyEnrollments"));
-        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "ParticipantProfiles"));
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "Books"));
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "Authors"));
 
         // Verify views were created
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View);
         Assert.NotEmpty(views);
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "SimpleStudyView"));
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "DeidentifiedStudyEnrollmentView"));
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "DeidentifiedParticipantProfileView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "SimpleBookView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "BookSummaryView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "BookAuthorView"));
     }
 
     [Fact]
@@ -274,10 +274,10 @@ public class DacpacGeneratorTests : IDisposable
     {
         // Arrange
         var generator = new DacpacGenerator();
-        var outputPath = Path.Combine(_tempOutputDir, "Participants.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Library.dacpac");
 
         // Act
-        generator.GenerateDacpac(typeof(ParticipantsDbContext), outputPath);
+        generator.GenerateDacpac(typeof(LibraryContext), outputPath);
 
         // Assert
         Assert.True(File.Exists(outputPath), "DACPAC file should exist");
@@ -287,7 +287,7 @@ public class DacpacGeneratorTests : IDisposable
         // Verify the indexed view has a clustered index
         var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index);
         Assert.Contains(indexes, idx => 
-            idx.Name.Parts.Any(p => p.Contains("DeidentifiedStudyEnrollmentView")));
+            idx.Name.Parts.Any(p => p.Contains("BookSummaryView")));
     }
 }
 
