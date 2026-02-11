@@ -16,4 +16,8 @@
     <PackageReference Include="Microsoft.SqlServer.DacFx" Version="170.2.70" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj" />
+  </ItemGroup>
+
 </Project>

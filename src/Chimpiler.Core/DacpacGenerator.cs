@@ -12,6 +12,7 @@ namespace Chimpiler.Core;
 public class DacpacGenerator
 {
     private readonly Action<string>? _logger;
+    private Type? _currentDbContextType;
 
     public DacpacGenerator(Action<string>? logger = null)
     {
@@ -24,6 +25,8 @@ public class DacpacGenerator
     public void GenerateDacpac(Type dbContextType, string outputPath)
     {
         Log($"Generating DACPAC for {dbContextType.Name}...");
+
+        _currentDbContextType = dbContextType;
 
         // Get the database name
         var databaseName = DacpacNaming.GetDatabaseName(dbContextType);
@@ -84,11 +87,16 @@ public class DacpacGenerator
 
     private void GenerateSchemaObjects(TSqlModel model, IModel efModel, string databaseName)
     {
+        // Separate entities into tables and views
+        var allEntities = efModel.GetEntityTypes().ToList();
+        var tables = allEntities.Where(e => !ViewSqlGenerator.IsView(e)).ToList();
+        var views = allEntities.Where(e => ViewSqlGenerator.IsView(e)).ToList();
+
         // Create schemas
         var schemas = new HashSet<string>();
-        foreach (var entityType in efModel.GetEntityTypes())
+        foreach (var entityType in allEntities)
         {
-            var schema = entityType.GetSchema() ?? "dbo";
+            var schema = entityType.GetSchema() ?? entityType.GetViewSchema() ?? "dbo";
             schemas.Add(schema);
         }
 
@@ -98,17 +106,24 @@ public class DacpacGenerator
             CreateSchema(model, schema);
         }
 
-        // Create tables
-        foreach (var entityType in efModel.GetEntityTypes())
+        // Create tables first (views may depend on them)
+        foreach (var entityType in tables)
         {
             Log($"  Creating table: {entityType.GetTableName()}");
             CreateTable(model, entityType);
         }
 
-        // Create foreign keys
-        foreach (var entityType in efModel.GetEntityTypes())
+        // Create foreign keys for tables
+        foreach (var entityType in tables)
         {
             CreateForeignKeys(model, entityType);
+        }
+
+        // Create views after tables
+        if (views.Any())
+        {
+            Log($"  Creating {views.Count} view(s)");
+            CreateViews(model, views);
         }
     }
 
@@ -234,6 +249,46 @@ public class DacpacGenerator
     {onDelete}";
 
             model.AddObjects(fkScript);
+        }
+    }
+
+    private void CreateViews(TSqlModel model, List<IEntityType> views)
+    {
+        // We need a DbContext instance to generate the view SQL
+        // Use the context type from the first view's annotation, or create a new instance
+        using var context = CreateDbContext(_currentDbContextType!);
+        
+        var viewGenerator = new ViewSqlGenerator(_logger);
+
+        foreach (var view in views)
+        {
+            var viewName = view.GetViewName();
+            Log($"  Creating view: {viewName}");
+
+            string? viewDdl = null;
+            try
+            {
+                viewDdl = viewGenerator.GenerateViewDdl(view, context);
+                Log($"Generated view DDL for {viewName}:\n{viewDdl}");
+                model.AddObjects(viewDdl);
+                
+                // Create clustered index separately if needed
+                var indexDdl = viewGenerator.GenerateClusteredIndexDdl(view);
+                if (!string.IsNullOrEmpty(indexDdl))
+                {
+                    Log($"Generated index DDL for {viewName}:\n{indexDdl}");
+                    model.AddObjects(indexDdl);
+                }
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = $"Failed to generate view {viewName}: {ex.Message}";
+                if (viewDdl != null)
+                {
+                    errorMsg += $"\nGenerated SQL was:\n{viewDdl}";
+                }
+                throw new InvalidOperationException(errorMsg, ex);
+            }
         }
     }
 

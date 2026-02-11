@@ -11,4 +11,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj" />
+  </ItemGroup>
+
 </Project>

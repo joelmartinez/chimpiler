@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Chimpiler.EfMigrate;
 
 namespace Chimpiler.TestFixtures;
 
@@ -205,3 +206,151 @@ public class InventoryItem
     public int Quantity { get; set; }
     public DateTime LastUpdated { get; set; }
 }
+
+/// <summary>
+/// Test database with views - includes simple view, view with column rename, and indexed view
+/// </summary>
+public class LibraryContext : DbContext
+{
+    public DbSet<Book> Books { get; set; } = null!;
+    public DbSet<Author> Authors { get; set; } = null!;
+    
+    // Views
+    public DbSet<BookSummaryView> BookSummaryView { get; set; } = null!;
+    public DbSet<BookAuthorView> BookAuthorView { get; set; } = null!;
+    public DbSet<SimpleBookView> SimpleBookView { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=LibraryDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // Tables
+        modelBuilder.Entity<Book>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.ISBN).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.AuthorId).IsRequired();
+            entity.Property(e => e.PublishedYear);
+            entity.Property(e => e.Genre).HasMaxLength(50);
+        });
+
+        modelBuilder.Entity<Author>(entity =>
+        {
+            entity.HasKey(e => e.AuthorId);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.BirthYear);
+            entity.Property(e => e.Country).HasMaxLength(50);
+            entity.Property(e => e.Biography).HasMaxLength(1000);
+        });
+
+        // Simple view over single table (no column renames)
+        modelBuilder.Entity<SimpleBookView>(entity =>
+        {
+            entity.ToView("SimpleBookView")
+                  .HasViewDefinition<SimpleBookView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      select new SimpleBookView
+                      {
+                          Id = b.Id,
+                          Title = b.Title,
+                          PublishedYear = b.PublishedYear
+                      });
+            
+            entity.HasKey(e => e.Id);
+        });
+
+        // View with column rename - ISBN becomes BookCode
+        modelBuilder.Entity<BookSummaryView>(entity =>
+        {
+            entity.ToView("BookSummaryView")
+                  .HasViewDefinition<BookSummaryView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      select new BookSummaryView
+                      {
+                          Id = b.Id,
+                          Title = b.Title,
+                          BookCode = b.ISBN,
+                          PublishedYear = b.PublishedYear,
+                          Genre = b.Genre
+                      })
+                  .WithSchemaBinding()
+                  .HasClusteredIndex(v => v.Id);
+            
+            entity.HasKey(e => e.Id);
+        });
+
+        // View with JOIN
+        modelBuilder.Entity<BookAuthorView>(entity =>
+        {
+            entity.ToView("BookAuthorView")
+                  .HasViewDefinition<BookAuthorView, LibraryContext>(ctx =>
+                      from b in ctx.Books
+                      join a in ctx.Authors on b.AuthorId equals a.AuthorId
+                      select new BookAuthorView
+                      {
+                          BookId = b.Id,
+                          Title = b.Title,
+                          AuthorName = a.Name,
+                          Country = a.Country,
+                          PublishedYear = b.PublishedYear
+                      });
+            
+            // Composite key for this view
+            entity.HasKey(e => new { e.BookId, e.Title });
+        });
+    }
+}
+
+// Table entities
+public class Book
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string ISBN { get; set; } = string.Empty;
+    public int AuthorId { get; set; }
+    public int? PublishedYear { get; set; }
+    public string? Genre { get; set; }
+}
+
+public class Author
+{
+    public int AuthorId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int? BirthYear { get; set; }
+    public string? Country { get; set; }
+    public string? Biography { get; set; }
+}
+
+// View entities
+public class SimpleBookView
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public int? PublishedYear { get; set; }
+}
+
+public class BookSummaryView
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string BookCode { get; set; } = string.Empty;
+    public int? PublishedYear { get; set; }
+    public string? Genre { get; set; }
+}
+
+public class BookAuthorView
+{
+    public int BookId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string AuthorName { get; set; } = string.Empty;
+    public string? Country { get; set; }
+    public int? PublishedYear { get; set; }
+}
+

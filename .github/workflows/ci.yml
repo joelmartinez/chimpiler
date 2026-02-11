@@ -21,24 +21,42 @@ jobs:
       with:
         dotnet-version: '10.0.x'
     
-    - name: Extract version from csproj
+    - name: Extract version from csproj files
       id: version
       run: |
-        VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" src/Chimpiler/Chimpiler.csproj)
-        echo "base_version=$VERSION" >> $GITHUB_OUTPUT
-        echo "full_version=$VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+        CLI_VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" src/Chimpiler/Chimpiler.csproj)
+        LIB_VERSION=$(grep -oPm1 "(?<=<Version>)[^<]+" src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj)
+        echo "cli_base_version=$CLI_VERSION" >> $GITHUB_OUTPUT
+        echo "cli_full_version=$CLI_VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
+        echo "lib_base_version=$LIB_VERSION" >> $GITHUB_OUTPUT
+        echo "lib_full_version=$LIB_VERSION.${{ github.run_number }}" >> $GITHUB_OUTPUT
     
     - name: Restore dependencies
       run: dotnet restore
     
-    - name: Build
-      run: dotnet build --no-restore --configuration Release /p:Version=${{ steps.version.outputs.full_version }}
+    - name: Build Chimpiler CLI tool
+      run: dotnet build src/Chimpiler/Chimpiler.csproj --no-restore --configuration Release /p:Version=${{ steps.version.outputs.cli_full_version }}
+    
+    - name: Build Chimpiler.EfMigrate library
+      run: dotnet build src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj --no-restore --configuration Release /p:Version=${{ steps.version.outputs.lib_full_version }}
+    
+    - name: Build Chimpiler.Core
+      run: dotnet build src/Chimpiler.Core/Chimpiler.Core.csproj --no-restore --configuration Release
+    
+    - name: Build Chimpiler.TestFixtures
+      run: dotnet build tests/Chimpiler.TestFixtures/Chimpiler.TestFixtures.csproj --no-restore --configuration Release
+    
+    - name: Build Chimpiler.Tests
+      run: dotnet build tests/Chimpiler.Tests/Chimpiler.Tests.csproj --no-restore --configuration Release
     
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
     
-    - name: Pack
-      run: dotnet pack src/Chimpiler/Chimpiler.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.full_version }}
+    - name: Pack Chimpiler CLI tool
+      run: dotnet pack src/Chimpiler/Chimpiler.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.cli_full_version }}
+    
+    - name: Pack Chimpiler.EfMigrate library
+      run: dotnet pack src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.lib_full_version }}
     
     - name: Upload package artifact
       uses: actions/upload-artifact@v4
