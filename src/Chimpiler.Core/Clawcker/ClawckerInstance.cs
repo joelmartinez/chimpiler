@@ -44,4 +44,14 @@ public class ClawckerInstance
     /// Creation timestamp
     /// </summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// The AI provider (anthropic, openai, openrouter, gemini)
+    /// </summary>
+    public string? Provider { get; set; }
+
+    /// <summary>
+    /// The API key for the configured provider (stored for container env var)
+    /// </summary>
+    public string? ApiKey { get; set; }
 }

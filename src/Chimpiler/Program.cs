@@ -9,6 +9,20 @@ class Program
 {
     static async Task<int> Main(string[] args)
     {
+        // Handle bare --help or -h at root level with custom help
+        if (args.Length == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "-?"))
+        {
+            ShowGeneralHelp();
+            return 0;
+        }
+
+        // Handle "help subcommand" pattern for subcommand --help
+        if (args.Length == 2 && (args[1] == "--help" || args[1] == "-h" || args[1] == "-?"))
+        {
+            ShowSubcommandHelp(args[0]);
+            return 0;
+        }
+
         var rootCommand = new RootCommand("Chimpiler - A multi-purpose CLI tooling ecosystem");
 
         // Create the ef-migrate command
@@ -414,6 +428,41 @@ class Program
         }, healthNameArg);
 
         clawckerCommand.AddCommand(healthCommand);
+
+        // Create the 'configure' subcommand
+        var configureCommand = new Command("configure", "Configure or reconfigure an instance with a new provider/model");
+        var configureNameArg = new Argument<string>(
+            name: "name",
+            description: "Name of the instance to configure");
+        configureCommand.AddArgument(configureNameArg);
+        
+        var configureProviderOption = new Option<string?>(
+            aliases: new[] { "--provider" },
+            description: "AI provider (anthropic, openai, openrouter, gemini)");
+        configureProviderOption.AddAlias("-p");
+        configureCommand.AddOption(configureProviderOption);
+        
+        var configureApiKeyOption = new Option<string?>(
+            aliases: new[] { "--api-key" },
+            description: "API key for the selected provider");
+        configureApiKeyOption.AddAlias("-k");
+        configureCommand.AddOption(configureApiKeyOption);
+
+        configureCommand.SetHandler(async (string name, string? provider, string? apiKey) =>
+        {
+            try
+            {
+                var service = new ClawckerService(Console.WriteLine);
+                await service.ConfigureInstanceAsync(name, provider, apiKey);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
+        }, configureNameArg, configureProviderOption, configureApiKeyOption);
+
+        clawckerCommand.AddCommand(configureCommand);
 
         return clawckerCommand;
     }

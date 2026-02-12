@@ -1,155 +1,160 @@
-# Clawcker - OpenClaw Instance Manager
+CLAWCKER - OpenClaw Instance Manager
+================================================================================
 
-Clawcker is a subcommand of Chimpiler that makes it trivially easy to create, run, and access local OpenClaw instances using Docker.
+Clawcker makes it easy to create, run, and access local OpenClaw instances
+using Docker.
 
-## Prerequisites
+PREREQUISITES
+  - Docker must be installed and running
+  - Docker daemon must be accessible
 
-- Docker must be installed and running
-- Docker daemon must be accessible
+QUICK START
+  $ chimpiler clawcker new myagent
+  $ chimpiler clawcker talk myagent
 
-## Quick Start
+  The 'new' command prompts for your AI provider and API key, then
+  automatically starts the instance.
 
-Create, start, and access an OpenClaw instance with three commands:
+COMMANDS
+--------------------------------------------------------------------------------
 
-```bash
-chimpiler clawcker new myagent
-chimpiler clawcker start myagent
-chimpiler clawcker talk myagent
-```
+  new <name>           Create a new OpenClaw instance
+  configure <name>     Change provider/model for an existing instance
+  start <name>         Start an instance
+  stop <name>          Stop a running instance
+  talk <name>          Open the web UI in your browser
+  list                 List all instances
+  health <name>        Check if an instance is healthy
 
-## Commands
+COMMAND DETAILS
+--------------------------------------------------------------------------------
 
-### `chimpiler clawcker new <name>`
+new <name>
+  Creates a new OpenClaw instance with the specified name.
 
-Creates a new OpenClaw instance with the specified name.
+  Options:
+    -p, --provider <provider>   AI provider: anthropic, openai, openrouter, gemini
+    -k, --api-key <key>         API key for the provider
 
-**What it does:**
-- Checks that Docker is installed and running
-- Pulls the latest OpenClaw Docker image (`ghcr.io/phioranex/openclaw-docker:latest`)
-- Creates a configuration directory at `./.clawcker/<name>/config`
-- Creates a workspace directory at `./.clawcker/<name>/workspace`
-- Allocates a unique port for this instance
-- Generates a secure random gateway authentication token
-- Saves instance metadata
+  If options are omitted, you'll be prompted interactively.
 
-### `chimpiler clawcker start <name>`
+  Default models by provider:
+    anthropic     anthropic/claude-sonnet-4
+    openai        openai/gpt-5.2
+    openrouter    openrouter/anthropic/claude-sonnet-4
+    gemini        google-gemini/gemini-2.5-pro
 
-Starts an OpenClaw instance.
+  What it does:
+    - Pulls the OpenClaw Docker image
+    - Creates config at ./.clawcker/<name>/config
+    - Creates workspace at ./.clawcker/<name>/workspace
+    - Allocates a unique port (starting from 18789)
+    - Generates a secure gateway token
+    - Configures credentials and default model
+    - Automatically starts the instance
 
-**What it does:**
-- Checks if the instance exists
-- Creates and starts a Docker container with:
-  - The instance's configuration and workspace mounted as volumes
-  - The gateway token set as an environment variable
-  - The instance's unique port exposed for the web UI
-  - Automatic restart enabled
-- Starts the OpenClaw gateway
+configure <name>
+  Reconfigure an existing instance with a new provider/model.
 
-### `chimpiler clawcker talk <name>`
+  Options:
+    -p, --provider <provider>   AI provider: anthropic, openai, openrouter, gemini
+    -k, --api-key <key>         API key for the provider
 
-Opens the OpenClaw web UI for an instance in your default browser.
+  Example:
+    $ chimpiler clawcker configure myagent --provider openai --api-key sk-...
 
-**What it does:**
-- Checks if the instance exists
-- Verifies the container is running
-- Opens the web UI URL (with authentication token) in your default browser
+start <name>
+  Start an OpenClaw instance. Creates the Docker container if needed.
 
-### `chimpiler clawcker list`
+stop <name>
+  Stop a running instance. The container is stopped but not removed.
 
-Lists all Clawcker instances.
+talk <name>
+  Open the web UI in your default browser (includes auth token).
 
-**What it does:**
-- Scans the `./.clawcker/` directory for instances
-- Checks the status of each instance's Docker container
-- Displays instance details including status, port, and creation time
+list
+  List all instances with status, port, and creation time.
 
-### `chimpiler clawcker stop <name>`
+health <name>
+  Check container status and test if the gateway is responding.
 
-Stops a running OpenClaw instance.
+INSTANCE STORAGE
+--------------------------------------------------------------------------------
 
-**What it does:**
-- Checks if the instance exists
-- Stops the Docker container (but does not remove it)
-- The instance can be restarted with `start`
+Instances are stored in ./.clawcker/<name>/:
 
-## Instance Storage
+  config/         OpenClaw configuration files
+  workspace/      Agent workspace files
+  instance.json   Instance metadata (name, port, token, provider)
 
-Instances are stored in `./.clawcker/<name>/` (relative to current working directory):
-- `config/` - OpenClaw configuration files
-- `workspace/` - Agent workspace files
-- `instance.json` - Instance metadata (name, port, token, etc.)
+This allows version control of the .clawcker/ directory with your project.
 
-This allows you to commit the `.clawcker/` directory to version control and manage your instances alongside your project.
+DOCKER DETAILS
+--------------------------------------------------------------------------------
 
-## Port Allocation
+  Image:       ghcr.io/phioranex/openclaw-docker:latest
+  Container:   clawcker-<instance-name>
+  Restart:     unless-stopped
 
-Each instance automatically receives its own unique port, starting from 18789. When you create a new instance, Clawcker finds the next available port to avoid conflicts. The `talk` command automatically uses the correct port for each instance.
+  Volumes:
+    ./.clawcker/<name>/config    -> /home/node/.openclaw
+    ./.clawcker/<name>/workspace -> /home/node/.openclaw/workspace
 
-## Security
+  Environment:
+    OPENCLAW_GATEWAY_TOKEN       Gateway auth token
+    OPENAI_API_KEY               (if using OpenAI)
+    ANTHROPIC_API_KEY            (if using Anthropic)
+    OPENROUTER_API_KEY           (if using OpenRouter)
+    GOOGLE_API_KEY               (if using Gemini)
 
-- Each instance has a unique, randomly generated 256-bit gateway authentication token
-- The token is required to access the web UI
-- Tokens are stored locally in the instance metadata file
+SECURITY
+--------------------------------------------------------------------------------
 
-## Docker Container Details
+Each instance has a unique 256-bit gateway token stored in instance.json.
+The token is required to access the web UI.
 
-- **Image:** `ghcr.io/phioranex/openclaw-docker:latest`
-- **Container name:** `clawcker-<instance-name>`
-- **Volumes:**
-  - `./.clawcker/<name>/config` → `/home/node/.openclaw`
-  - `./.clawcker/<name>/workspace` → `/home/node/.openclaw/workspace`
-- **Environment variables:**
-  - `OPENCLAW_GATEWAY_TOKEN` - Authentication token
-- **Restart policy:** unless-stopped
+EXAMPLES
+--------------------------------------------------------------------------------
 
-## Troubleshooting
+  Create and access a new instance:
+    $ chimpiler clawcker new myagent
+    $ chimpiler clawcker talk myagent
 
-### Docker not found
-**Error:** Docker is not installed. Please install Docker from https://www.docker.com/get-started
+  Create with specific provider:
+    $ chimpiler clawcker new myagent -p openai -k sk-...
 
-**Solution:** Install Docker Desktop or Docker Engine.
+  Switch provider:
+    $ chimpiler clawcker configure myagent -p anthropic
 
-### Docker daemon not running
-**Error:** Docker daemon is not running. Please start Docker and try again
+  List instances:
+    $ chimpiler clawcker list
 
-**Solution:** Start Docker Desktop or the Docker daemon.
+  Stop/restart:
+    $ chimpiler clawcker stop myagent
+    $ chimpiler clawcker start myagent
 
-### Instance already exists
-**Error:** Instance 'myagent' already exists
+  Check health:
+    $ chimpiler clawcker health myagent
 
-**Solution:** Use a different name or remove the existing instance directory.
+TROUBLESHOOTING
+--------------------------------------------------------------------------------
 
-### Instance not running
-**Error:** Instance 'myagent' is not running. Start it first with 'chimpiler clawcker start myagent'
+  "Docker is not installed"
+    Install Docker Desktop or Docker Engine from https://docker.com/get-started
 
-**Solution:** Start the instance with `chimpiler clawcker start myagent`.
+  "Docker daemon is not running"
+    Start Docker Desktop or the Docker daemon service.
 
-## Examples
+  "Instance 'name' already exists"
+    Use a different name or remove ./.clawcker/<name>/
 
-### Create and start a new instance
-```bash
-chimpiler clawcker new myagent
-chimpiler clawcker start myagent
-chimpiler clawcker talk myagent
-```
+  "Instance 'name' is not running"
+    Run: chimpiler clawcker start <name>
 
-### List all instances
-```bash
-chimpiler clawcker list
-```
+NOTES
+--------------------------------------------------------------------------------
 
-### Stop an instance
-```bash
-chimpiler clawcker stop myagent
-```
-
-### Restart a stopped instance
-```bash
-chimpiler clawcker start myagent
-```
-
-## Notes
-
-- Multiple instances can run simultaneously, each on its own port
-- The web UI will guide you through the OpenClaw onboarding process on first access
-- Instance data is stored in the current working directory, making it easy to version control
+  - Multiple instances can run simultaneously on different ports
+  - Instances auto-start after creation
+  - Use 'configure' to switch providers without recreating
+  - Port allocation starts at 18789 and auto-increments
