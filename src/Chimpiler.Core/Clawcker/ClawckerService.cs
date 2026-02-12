@@ -389,10 +389,17 @@ public class ClawckerService
             RunCommand("docker", $"rm {instance.ContainerName}", captureOutput: true);
         }
 
+        // Remove any existing temporary config container from previous failed runs
+        var tempContainerName = $"{instance.ContainerName}-config";
+        if (CheckContainerExists(tempContainerName))
+        {
+            RunCommand("docker", $"rm -f {tempContainerName}", captureOutput: true);
+        }
+
         // Start a temporary container and run the models/auth commands
         LogInfo("Starting temporary container for configuration...");
         var dockerArgs = $"run -d " +
-            $"--name {instance.ContainerName}-config " +
+            $"--name {tempContainerName} " +
             $"-e OPENCLAW_GATEWAY_TOKEN={instance.GatewayToken} " +
             $"-v \"{instance.ConfigPath}:/home/node/.openclaw\" " +
             $"-v \"{instance.WorkspacePath}:/home/node/.openclaw/workspace\" " +
@@ -420,7 +427,7 @@ public class ClawckerService
 
             // Add auth credentials using paste-token with stdin
             LogInfo("Configuring authentication...");
-            var authArgs = $"exec -i {instance.ContainerName}-config " +
+            var authArgs = $"exec -i {tempContainerName} " +
                 $"node /app/dist/entry.js models auth paste-token --provider {providerName}";
             var authResult = RunCommandWithInput("docker", authArgs, apiKey);
             if (authResult.ExitCode != 0)
@@ -430,7 +437,7 @@ public class ClawckerService
 
             // Set the default model
             LogInfo($"Setting default model to {model}...");
-            var modelArgs = $"exec {instance.ContainerName}-config " +
+            var modelArgs = $"exec {tempContainerName} " +
                 $"node /app/dist/entry.js models set {model}";
             var modelResult = RunCommand("docker", modelArgs, captureOutput: true);
             if (modelResult.ExitCode != 0)
@@ -443,7 +450,7 @@ public class ClawckerService
         finally
         {
             // Stop and remove the temporary container
-            RunCommand("docker", $"rm -f {instance.ContainerName}-config", captureOutput: true);
+            RunCommand("docker", $"rm -f {tempContainerName}", captureOutput: true);
         }
 
         // Update instance metadata with new provider/apiKey
