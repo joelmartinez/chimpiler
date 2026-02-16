@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Net.Http;
@@ -823,12 +824,27 @@ public class ClawckerService
 
         // Find the next available port starting from BASE_PORT
         var port = BASE_PORT;
-        while (existingPorts.Contains(port))
+        while (existingPorts.Contains(port) || !IsPortAvailable(port))
         {
             port++;
         }
 
         return port;
+    }
+
+    private static bool IsPortAvailable(int port)
+    {
+        try
+        {
+            using var listener = new TcpListener(System.Net.IPAddress.Any, port);
+            listener.Start();
+            listener.Stop();
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
     }
 
     private void CreateOpenClawConfig(string configDir, string gatewayToken)
@@ -863,6 +879,13 @@ public class ClawckerService
 
     private async Task StartContainerForOnboarding(ClawckerInstance instance, string provider, string apiKey)
     {
+        // Remove any existing setup container from previous failed runs
+        var setupContainerName = $"{instance.ContainerName}-setup";
+        if (CheckContainerExists(setupContainerName))
+        {
+            RunCommand("docker", $"rm -f {setupContainerName}", captureOutput: true);
+        }
+
         // Start container temporarily
         var dockerArgs = $"run -d " +
             $"--name {instance.ContainerName}-setup " +

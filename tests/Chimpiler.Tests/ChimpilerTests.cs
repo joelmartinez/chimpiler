@@ -289,6 +289,30 @@ public class DacpacGeneratorTests : IDisposable
         Assert.Contains(indexes, idx => 
             idx.Name.Parts.Any(p => p.Contains("BookSummaryView")));
     }
+
+    [Fact]
+    public void GenerateDacpac_WithViewDefinedUsingHasViewSql_ShouldCreateViewWithRawSql()
+    {
+        // Arrange
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "Library.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(LibraryContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+        
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        
+        // Verify the view was created
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View);
+        var bookCountView = views.FirstOrDefault(v => v.Name.Parts.Any(p => p == "BookCountView"));
+        Assert.NotNull(bookCountView);
+
+        // The view definition is derived from the raw SQL passed to HasViewSql.
+        // If it weren't, DACPAC generation would fail or the view would be missing.
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable

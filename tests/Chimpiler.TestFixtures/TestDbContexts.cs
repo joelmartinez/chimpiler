@@ -219,6 +219,7 @@ public class LibraryContext : DbContext
     public DbSet<BookSummaryView> BookSummaryView { get; set; } = null!;
     public DbSet<BookAuthorView> BookAuthorView { get; set; } = null!;
     public DbSet<SimpleBookView> SimpleBookView { get; set; } = null!;
+    public DbSet<BookCountView> BookCountView { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -305,6 +306,21 @@ public class LibraryContext : DbContext
             // Composite key for this view
             entity.HasKey(e => new { e.BookId, e.Title });
         });
+
+        // View using raw SQL (escape hatch for complex SQL like CTEs)
+        modelBuilder.Entity<BookCountView>(entity =>
+        {
+            entity.ToView("BookCountView")
+                  .HasViewSql(@"SELECT 
+                      a.AuthorId,
+                      a.Name,
+                      COUNT(b.Id) as BookCount
+                  FROM Authors a
+                  LEFT JOIN Books b ON a.AuthorId = b.AuthorId
+                  GROUP BY a.AuthorId, a.Name");
+            
+            entity.HasKey(e => e.AuthorId);
+        });
     }
 }
 
@@ -352,5 +368,12 @@ public class BookAuthorView
     public string AuthorName { get; set; } = string.Empty;
     public string? Country { get; set; }
     public int? PublishedYear { get; set; }
+}
+
+public class BookCountView
+{
+    public int AuthorId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int BookCount { get; set; }
 }
 
