@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.Loader;
 using Microsoft.EntityFrameworkCore;
 
 namespace Chimpiler.Core;
@@ -37,7 +38,12 @@ public class DbContextDiscovery
             throw new FileNotFoundException($"Assembly not found: {assemblyPath}");
         }
 
-        // Load the assembly from the specified path
+        var loadContext = AssemblyLoadContext.GetLoadContext(typeof(DbContextDiscovery).Assembly);
+        if (loadContext != null)
+        {
+            return loadContext.LoadFromAssemblyPath(Path.GetFullPath(assemblyPath));
+        }
+
         return Assembly.LoadFrom(assemblyPath);
     }
 }
