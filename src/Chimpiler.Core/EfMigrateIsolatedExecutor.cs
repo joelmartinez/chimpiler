@@ -22,8 +22,34 @@ internal sealed class EfMigrateIsolatedExecutor
         }
 
         var loadContext = new EfMigrateLoadContext(fullTargetAssemblyPath, coreAssemblyPath);
+        var runtimeEfMajor = EfCoreVersionInfo.RuntimeMajor;
+        var runtimeEfVersion = EfCoreVersionInfo.RuntimeVersion;
+        int? targetEfMajor = null;
+        Version? targetEfVersion = null;
+
         try
         {
+            var targetAssembly = loadContext.LoadFromAssemblyPath(fullTargetAssemblyPath);
+            var efCoreReference = targetAssembly.GetReferencedAssemblies()
+                .FirstOrDefault(a => a.Name == "Microsoft.EntityFrameworkCore");
+            if (efCoreReference?.Version != null)
+            {
+                targetEfVersion = efCoreReference.Version;
+                targetEfMajor = efCoreReference.Version.Major;
+            }
+
+            if (targetEfMajor == null)
+            {
+                throw new InvalidOperationException(
+                    "Unable to determine EF Core reference from the target assembly. Ensure it references Microsoft.EntityFrameworkCore.");
+            }
+
+            if (targetEfMajor.Value != runtimeEfMajor)
+            {
+                throw new InvalidOperationException(
+                    $"EF Core major version mismatch: ef-migrate uses EF Core {runtimeEfVersion} (major {runtimeEfMajor}) but the target assembly references Microsoft.EntityFrameworkCore {targetEfVersion} (major {targetEfMajor}). Major versions must match.");
+            }
+
             var coreAssembly = loadContext.LoadFromAssemblyPath(coreAssemblyPath);
             var workerType = coreAssembly.GetType("Chimpiler.Core.EfMigrateWorker")
                 ?? throw new InvalidOperationException("Failed to find ef-migrate worker type.");
@@ -40,12 +66,44 @@ internal sealed class EfMigrateIsolatedExecutor
         }
         catch (TargetInvocationException ex) when (ex.InnerException != null)
         {
+            if (targetEfMajor == runtimeEfMajor && IsAssemblyResolutionFailure(ex.InnerException))
+            {
+                throw new InvalidOperationException(
+                    $"Target assembly dependencies could not be resolved even though EF Core major versions match (tool major {runtimeEfMajor}, target major {targetEfMajor}). Ensure the target assembly output includes all transitive dependencies and matching runtime assets. Root error: {ex.InnerException.Message}",
+                    ex.InnerException);
+            }
             throw ex.InnerException;
+        }
+        catch (Exception ex) when (targetEfMajor == runtimeEfMajor && IsAssemblyResolutionFailure(ex))
+        {
+            throw new InvalidOperationException(
+                $"Target assembly dependencies could not be resolved even though EF Core major versions match (tool major {runtimeEfMajor}, target major {targetEfMajor}). Ensure the target assembly output includes all transitive dependencies and matching runtime assets. Root error: {ex.Message}",
+                ex);
         }
         finally
         {
             loadContext.Unload();
         }
+    }
+
+    private static bool IsAssemblyResolutionFailure(Exception ex)
+    {
+        if (ex is FileNotFoundException or FileLoadException or BadImageFormatException)
+        {
+            return true;
+        }
+
+        if (ex is ReflectionTypeLoadException reflectionTypeLoadException)
+        {
+            return reflectionTypeLoadException.LoaderExceptions.Any(e => e is FileNotFoundException or FileLoadException or BadImageFormatException);
+        }
+
+        if (!string.IsNullOrEmpty(ex.Message) && ex.Message.Contains("Could not load file or assembly", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return ex.InnerException != null && IsAssemblyResolutionFailure(ex.InnerException);
     }
 }
 

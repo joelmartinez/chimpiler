@@ -19,6 +19,8 @@ public class EfMigrateService
     /// </summary>
     public void Execute(EfMigrateOptions options)
     {
+        Log($"ef-migrate runtime EF Core: {EfCoreVersionInfo.RuntimeVersion} (major {EfCoreVersionInfo.RuntimeMajor})");
+
         try
         {
             var executor = new EfMigrateIsolatedExecutor(_logger);

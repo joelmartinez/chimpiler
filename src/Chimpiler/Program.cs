@@ -124,7 +124,9 @@ class Program
 
     static Command CreateEfMigrateCommand()
     {
-        var efMigrateCommand = new Command("ef-migrate", "Generate DACPACs from EF Core DbContext models");
+        var efMigrateCommand = new Command(
+            "ef-migrate",
+            $"Generate DACPACs from EF Core DbContext models (EF Core major {EfCoreVersionInfo.RuntimeMajor})");
 
         // Required options
         var assemblyOption = new Option<string>(
