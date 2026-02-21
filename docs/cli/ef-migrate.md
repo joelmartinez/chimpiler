@@ -97,5 +97,6 @@ NOTES
 
   - No live SQL Server connection required
   - DbContext must have parameterless constructor or configure OnConfiguring
+  - Target assemblies can use a different EF Core patch/minor version than Chimpiler within the same major version
   - Generated DACPACs work with SqlPackage and Azure DevOps pipelines
   - One DACPAC per DbContext
