@@ -89,7 +89,11 @@ public class DacpacGenerator
     {
         // Separate entities into tables and views
         var allEntities = efModel.GetEntityTypes().ToList();
-        var tables = allEntities.Where(e => !ViewSqlGenerator.IsView(e)).ToList();
+        var tables = allEntities
+            .Where(e => !ViewSqlGenerator.IsView(e))
+            .Where(e => !e.IsOwned())
+            .Where(e => !string.IsNullOrEmpty(e.GetTableName()))
+            .ToList();
         var views = allEntities.Where(e => ViewSqlGenerator.IsView(e)).ToList();
 
         // Create schemas

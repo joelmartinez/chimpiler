@@ -377,3 +377,67 @@ public class BookCountView
     public int BookCount { get; set; }
 }
 
+/// <summary>
+/// Test database with JSON-owned type mapped via OwnsOne(...).ToJson()
+/// </summary>
+public class JsonOwnedTrialsContext : DbContext
+{
+    public DbSet<JsonOwnedStudy> Studies { get; set; } = null!;
+    public DbSet<JsonOwnedOrganization> Organizations { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=JsonOwnedTrialsDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<JsonOwnedOrganization>(entity =>
+        {
+            entity.ToTable("Organizations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<JsonOwnedStudy>(entity =>
+        {
+            entity.ToTable("Studies");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PrincipalInvestigator).HasMaxLength(200);
+            entity.HasIndex(e => e.OrganizationId);
+
+            entity.HasOne<JsonOwnedOrganization>()
+                .WithMany()
+                .HasForeignKey(e => e.OrganizationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.OwnsOne(e => e.ProtocolData, owned =>
+            {
+                owned.ToJson();
+                owned.Property(p => p.PrincipalInvestigator).HasMaxLength(200);
+            });
+        });
+    }
+}
+
+public class JsonOwnedStudy
+{
+    public int Id { get; set; }
+    public int OrganizationId { get; set; }
+    public string? PrincipalInvestigator { get; set; }
+    public JsonOwnedProtocolData? ProtocolData { get; set; }
+}
+
+public class JsonOwnedProtocolData
+{
+    public string? PrincipalInvestigator { get; set; }
+}
+
+public class JsonOwnedOrganization
+{
+    public int Id { get; set; }
+    public string? Name { get; set; }
+}

@@ -180,6 +180,32 @@ public class DacpacGeneratorTests : IDisposable
     }
 
     [Fact]
+    public void GenerateDacpac_ForContextWithJsonOwnedType_ShouldCreateSingleStudiesTable()
+    {
+        // Arrange
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "JsonOwnedTrials.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(JsonOwnedTrialsContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+        Assert.Single(tables, t => t.Name.Parts.Any(p => p == "Studies"));
+
+        var primaryKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.PrimaryKeyConstraint).ToList();
+        Assert.Single(primaryKeys, pk => pk.Name.Parts.Any(p => p == "PK_dbo_Studies"));
+
+        var foreignKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.ForeignKeyConstraint).ToList();
+        Assert.DoesNotContain(foreignKeys, fk => fk.Name.Parts.Any(p => p.Contains("FK_Studies_Studies_")));
+    }
+
+    [Fact]
     public void GenerateDacpac_ForContextWithCustomSchema_ShouldCreateSchemaAndTables()
     {
         // Arrange
