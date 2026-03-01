@@ -228,6 +228,16 @@ public class DacpacGeneratorTests : IDisposable
         Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "Experiments"));
         Assert.DoesNotContain(tables, t => t.Name.Parts.Any(p => p is "DesignData" or "ParticipantData" or "MeasurementData" or "ScheduleData" or "Metrics" or "Milestones"));
 
+        // The four JSON-owned navigation properties must be stored as nvarchar(max) columns
+        // on the Experiments table (one column per top-level OwnsOne+ToJson navigation).
+        var experimentsTable = tables.Single(t => t.Name.Parts.Any(p => p == "Experiments"));
+        var columns = experimentsTable.GetChildren().Where(c => c.ObjectType == ModelSchema.Column).ToList();
+        var columnNames = columns.Select(c => c.Name.Parts.Last()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("DesignData", columnNames);
+        Assert.Contains("ParticipantData", columnNames);
+        Assert.Contains("MeasurementData", columnNames);
+        Assert.Contains("ScheduleData", columnNames);
+
         // The FK from Experiments to Cohorts must be present
         var foreignKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.ForeignKeyConstraint).ToList();
         Assert.NotEmpty(foreignKeys);

@@ -11,6 +11,8 @@ namespace Chimpiler.Core;
 /// </summary>
 public class DacpacGenerator
 {
+    private const string JsonColumnType = "nvarchar(max)";
+
     private readonly Action<string>? _logger;
     private Type? _currentDbContextType;
 
@@ -152,20 +154,35 @@ public class DacpacGenerator
         sb.AppendLine($"CREATE TABLE [{schema}].[{tableName}] (");
 
         var properties = entityType.GetProperties().ToList();
-        for (int i = 0; i < properties.Count; i++)
+
+        // JSON-owned types (OwnsOne/OwnsMany with ToJson) are not returned by GetProperties()
+        // on the parent entity. They are stored as a single nvarchar(max) JSON column whose
+        // name comes from GetContainerColumnName() on the owned entity type.
+        // Collect unique top-level JSON column names for this table.
+        var jsonColumns = entityType.Model.GetEntityTypes()
+            .Where(e => e.IsOwned() && e.IsMappedToJson() && e.GetTableName() == tableName && (e.GetSchema() ?? "dbo") == schema)
+            .Select(e => e.GetContainerColumnName())
+            .Where(col => !string.IsNullOrEmpty(col))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order()
+            .ToList();
+
+        var totalColumnItems = properties.Count + jsonColumns.Count;
+        var itemIndex = 0;
+
+        for (int i = 0; i < properties.Count; i++, itemIndex++)
         {
             var property = properties[i];
             var columnDef = GetColumnDefinition(property);
             sb.Append($"    {columnDef}");
+            sb.AppendLine(itemIndex < totalColumnItems - 1 ? "," : "");
+        }
 
-            if (i < properties.Count - 1)
-            {
-                sb.AppendLine(",");
-            }
-            else
-            {
-                sb.AppendLine();
-            }
+        foreach (var jsonColumn in jsonColumns)
+        {
+            sb.Append($"    [{jsonColumn}] {JsonColumnType} NULL");
+            sb.AppendLine(itemIndex < totalColumnItems - 1 ? "," : "");
+            itemIndex++;
         }
 
         // Add primary key
