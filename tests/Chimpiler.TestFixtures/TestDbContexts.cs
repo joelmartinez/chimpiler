@@ -441,3 +441,120 @@ public class JsonOwnedOrganization
     public int Id { get; set; }
     public string? Name { get; set; }
 }
+
+/// <summary>
+/// Test database with multiple JSON-owned types including nested OwnsMany,
+/// similar to a real-world scenario where many fields are stored as JSON blobs.
+/// </summary>
+public class MultiJsonOwnedContext : DbContext
+{
+    public DbSet<MjoCohort> Cohorts { get; set; } = null!;
+    public DbSet<MjoExperiment> Experiments { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=MultiJsonOwnedDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MjoCohort>(entity =>
+        {
+            entity.ToTable("Cohorts");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<MjoExperiment>(entity =>
+        {
+            entity.ToTable("Experiments");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(200);
+            entity.HasIndex(e => e.CohortId);
+
+            entity.HasOne<MjoCohort>()
+                .WithMany()
+                .HasForeignKey(e => e.CohortId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.OwnsOne(e => e.DesignData, owned =>
+            {
+                owned.ToJson();
+                owned.Property(p => p.Hypothesis).HasMaxLength(500);
+            });
+
+            entity.OwnsOne(e => e.ParticipantData, owned =>
+            {
+                owned.ToJson();
+            });
+
+            entity.OwnsOne(e => e.MeasurementData, owned =>
+            {
+                owned.ToJson();
+                owned.OwnsMany(m => m.Metrics);
+            });
+
+            entity.OwnsOne(e => e.ScheduleData, owned =>
+            {
+                owned.ToJson();
+                owned.OwnsMany(s => s.Milestones);
+            });
+        });
+    }
+}
+
+public class MjoCohort
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public class MjoExperiment
+{
+    public int Id { get; set; }
+    public int CohortId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public MjoDesignData DesignData { get; set; } = new();
+    public MjoParticipantData ParticipantData { get; set; } = new();
+    public MjoMeasurementData MeasurementData { get; set; } = new();
+    public MjoScheduleData ScheduleData { get; set; } = new();
+}
+
+public class MjoDesignData
+{
+    public string? Hypothesis { get; set; }
+    public string? Methodology { get; set; }
+}
+
+public class MjoParticipantData
+{
+    public int TargetCount { get; set; }
+    public string? EligibilityCriteria { get; set; }
+}
+
+public class MjoMeasurementData
+{
+    public string? PrimaryOutcome { get; set; }
+    public List<MjoMetric> Metrics { get; set; } = new();
+}
+
+public class MjoMetric
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Unit { get; set; }
+}
+
+public class MjoScheduleData
+{
+    public DateTime? PlannedStartDate { get; set; }
+    public List<MjoMilestone> Milestones { get; set; } = new();
+}
+
+public class MjoMilestone
+{
+    public string Name { get; set; } = string.Empty;
+    public int WeekOffset { get; set; }
+}
