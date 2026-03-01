@@ -11,6 +11,8 @@ namespace Chimpiler.Core;
 /// </summary>
 public class DacpacGenerator
 {
+    private const string JsonColumnType = "nvarchar(max)";
+
     private readonly Action<string>? _logger;
     private Type? _currentDbContextType;
 
@@ -117,10 +119,16 @@ public class DacpacGenerator
             CreateTable(model, entityType);
         }
 
+        // Build a set of all table names that exist in the model, used to validate FK constraints.
+        // Owned types mapped to JSON have no separate table and must not be referenced by FK constraints.
+        var knownTableNames = new HashSet<string>(
+            tables.Select(t => $"{t.GetSchema() ?? "dbo"}.{t.GetTableName()}"),
+            StringComparer.OrdinalIgnoreCase);
+
         // Create foreign keys for tables
         foreach (var entityType in tables)
         {
-            CreateForeignKeys(model, entityType);
+            CreateForeignKeys(model, entityType, knownTableNames);
         }
 
         // Create views after tables
@@ -146,20 +154,35 @@ public class DacpacGenerator
         sb.AppendLine($"CREATE TABLE [{schema}].[{tableName}] (");
 
         var properties = entityType.GetProperties().ToList();
-        for (int i = 0; i < properties.Count; i++)
+
+        // JSON-owned types (OwnsOne/OwnsMany with ToJson) are not returned by GetProperties()
+        // on the parent entity. They are stored as a single nvarchar(max) JSON column whose
+        // name comes from GetContainerColumnName() on the owned entity type.
+        // Collect unique top-level JSON column names for this table.
+        var jsonColumns = entityType.Model.GetEntityTypes()
+            .Where(e => e.IsOwned() && e.IsMappedToJson() && e.GetTableName() == tableName && (e.GetSchema() ?? "dbo") == schema)
+            .Select(e => e.GetContainerColumnName())
+            .Where(col => !string.IsNullOrEmpty(col))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order()
+            .ToList();
+
+        var totalColumnItems = properties.Count + jsonColumns.Count;
+        var itemIndex = 0;
+
+        for (int i = 0; i < properties.Count; i++, itemIndex++)
         {
             var property = properties[i];
             var columnDef = GetColumnDefinition(property);
             sb.Append($"    {columnDef}");
+            sb.AppendLine(itemIndex < totalColumnItems - 1 ? "," : "");
+        }
 
-            if (i < properties.Count - 1)
-            {
-                sb.AppendLine(",");
-            }
-            else
-            {
-                sb.AppendLine();
-            }
+        foreach (var jsonColumn in jsonColumns)
+        {
+            sb.Append($"    [{jsonColumn}] {JsonColumnType} NULL");
+            sb.AppendLine(itemIndex < totalColumnItems - 1 ? "," : "");
+            itemIndex++;
         }
 
         // Add primary key
@@ -223,7 +246,7 @@ public class DacpacGenerator
         }
     }
 
-    private void CreateForeignKeys(TSqlModel model, IEntityType entityType)
+    private void CreateForeignKeys(TSqlModel model, IEntityType entityType, HashSet<string> knownTableNames)
     {
         var schema = entityType.GetSchema() ?? "dbo";
         var tableName = entityType.GetTableName();
@@ -232,6 +255,16 @@ public class DacpacGenerator
         {
             var principalTable = foreignKey.PrincipalEntityType.GetTableName();
             var principalSchema = foreignKey.PrincipalEntityType.GetSchema() ?? "dbo";
+
+            // Skip FK if the principal table is not in the model.
+            // This happens when the principal is an owned type stored as a JSON column
+            // rather than a separate table (e.g. OwnsOne(...).ToJson()).
+            if (string.IsNullOrEmpty(principalTable) ||
+                !knownTableNames.Contains($"{principalSchema}.{principalTable}"))
+            {
+                Log($"  Skipping FK from [{schema}].[{tableName}] to [{principalSchema}].[{(string.IsNullOrEmpty(principalTable) ? "(no table)" : principalTable)}]: principal table not in model");
+                continue;
+            }
 
             var fkName = foreignKey.GetConstraintName() ?? 
                         $"FK_{schema}_{tableName}_{principalSchema}_{principalTable}_{string.Join("_", foreignKey.Properties.Select(p => p.Name))}";

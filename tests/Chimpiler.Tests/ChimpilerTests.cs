@@ -206,6 +206,51 @@ public class DacpacGeneratorTests : IDisposable
     }
 
     [Fact]
+    public void GenerateDacpac_ForContextWithMultipleJsonOwnedTypes_ShouldCreateValidDacpac()
+    {
+        // Arrange
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "MultiJsonOwned.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(MultiJsonOwnedContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        // Only the two non-owned tables should exist; no extra tables for JSON-owned types
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "Cohorts"));
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "Experiments"));
+        Assert.DoesNotContain(tables, t => t.Name.Parts.Any(p => p is "DesignData" or "ParticipantData" or "MeasurementData" or "ScheduleData" or "Metrics" or "Milestones"));
+
+        // The four JSON-owned navigation properties must be stored as nvarchar(max) columns
+        // on the Experiments table (one column per top-level OwnsOne+ToJson navigation).
+        var experimentsTable = tables.Single(t => t.Name.Parts.Any(p => p == "Experiments"));
+        var columns = experimentsTable.GetChildren().Where(c => c.ObjectType == ModelSchema.Column).ToList();
+        var columnNames = columns.Select(c => c.Name.Parts.Last()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("DesignData", columnNames);
+        Assert.Contains("ParticipantData", columnNames);
+        Assert.Contains("MeasurementData", columnNames);
+        Assert.Contains("ScheduleData", columnNames);
+
+        // The FK from Experiments to Cohorts must be present
+        var foreignKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.ForeignKeyConstraint).ToList();
+        Assert.NotEmpty(foreignKeys);
+        Assert.Contains(foreignKeys, fk => fk.Name.Parts.Any(p => p.Contains("Cohort")));
+
+        // No self-referential or invalid FKs (e.g. Experiments → Experiments) from JSON-owned relationships
+        Assert.DoesNotContain(foreignKeys, fk => fk.Name.Parts.Any(p => p.Contains("FK_Experiments_Experiments_")));
+
+        // The valid FK to Cohorts must never be skipped by the FK validation logic
+        Assert.DoesNotContain(logMessages, m => m.Contains("principal table not in model") && m.Contains("Cohort"));
+    }
+
+    [Fact]
     public void GenerateDacpac_ForContextWithCustomSchema_ShouldCreateSchemaAndTables()
     {
         // Arrange
