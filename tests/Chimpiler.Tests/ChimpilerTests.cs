@@ -384,6 +384,72 @@ public class DacpacGeneratorTests : IDisposable
         // The view definition is derived from the raw SQL passed to HasViewSql.
         // If it weren't, DACPAC generation would fail or the view would be missing.
     }
+
+    [Fact]
+    public void GenerateDacpac_ForContextWithDefaultValues_ShouldIncludeDefaultConstraints()
+    {
+        // Arrange – DefaultValuesContext uses HasDefaultValue() and HasDefaultValueSql()
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "DefaultValues.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(DefaultValuesContext), outputPath);
+
+        // Assert – DACPAC was created
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        // The WorkItems table must be present
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "WorkItems"));
+
+        // DEFAULT constraints must be generated for Status, CreatedAt, and Priority
+        var defaultConstraints = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.DefaultConstraint).ToList();
+        Assert.NotEmpty(defaultConstraints);
+
+        // Verify each configured default is represented
+        var constraintNames = defaultConstraints
+            .SelectMany(dc => dc.Name.Parts)
+            .ToList();
+
+        // The defaults for Status, CreatedAt, and Priority should produce three constraints
+        Assert.True(defaultConstraints.Count >= 3,
+            $"Expected at least 3 DEFAULT constraints, found {defaultConstraints.Count}. " +
+            $"Constraints: {string.Join(", ", constraintNames)}");
+    }
+
+    [Fact]
+    public void GenerateDacpac_ForContextWithPropertyInitializers_ShouldIncludeReflectionBasedDefaults()
+    {
+        // Arrange – PropertyInitializerContext has no HasDefaultValue() calls; the
+        // generator should read property initializer values via reflection.
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "PropertyInitializer.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(PropertyInitializerContext), outputPath);
+
+        // Assert – DACPAC was created without error
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+        Assert.Contains(tables, t => t.Name.Parts.Any(p => p == "ProductItems"));
+
+        // DEFAULT constraints must be generated for Category (="general") and IsActive (=true)
+        var defaultConstraints = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.DefaultConstraint).ToList();
+        Assert.True(defaultConstraints.Count >= 2,
+            $"Expected at least 2 DEFAULT constraints from property initializers, found {defaultConstraints.Count}.");
+
+        // The generator must have logged that it used reflection-based defaults
+        Assert.Contains(logMessages, m => m.Contains("reflection-based default"));
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable
