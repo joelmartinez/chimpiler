@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -208,7 +209,9 @@ public class DacpacGenerator
         var columnType = property.GetColumnType();
         var isNullable = property.IsNullable;
         var isIdentity = property.ValueGenerated == ValueGenerated.OnAdd && 
-                        (property.ClrType == typeof(int) || property.ClrType == typeof(long));
+                        (property.ClrType == typeof(int) || property.ClrType == typeof(long)) &&
+                        property.GetDefaultValue() == null &&
+                        string.IsNullOrEmpty(property.GetDefaultValueSql());
 
         var sb = new StringBuilder();
         sb.Append($"[{columnName}] {columnType}");
@@ -220,7 +223,143 @@ public class DacpacGenerator
 
         sb.Append(isNullable ? " NULL" : " NOT NULL");
 
+        // Emit a DEFAULT constraint so that deploying a new NOT NULL column onto an existing
+        // table (which already has rows) does not fail.  Identity columns manage their own
+        // value generation and must not receive an additional DEFAULT clause.
+        if (!isIdentity)
+        {
+            var defaultConstraintSql = GetDefaultConstraintSql(property);
+            if (defaultConstraintSql != null)
+            {
+                sb.Append($" DEFAULT ({defaultConstraintSql})");
+            }
+        }
+
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Returns the SQL expression to use inside a DEFAULT (...) constraint for the given
+    /// property, or <c>null</c> if no default should be emitted.
+    /// Resolution order:
+    ///   1. Explicit SQL expression configured via <c>HasDefaultValueSql()</c>.
+    ///   2. CLR value configured via <c>HasDefaultValue()</c>.
+    ///   3. Reflection-based fallback: reads the CLR property initializer from a freshly
+    ///      constructed instance of the entity class.  This covers the common case where a
+    ///      developer adds a NOT NULL property with a C# default (e.g.
+    ///      <c>public string Status { get; set; } = "pending";</c>) but forgets to call
+    ///      <c>HasDefaultValue()</c> in <c>OnModelCreating</c>.
+    /// </summary>
+    private string? GetDefaultConstraintSql(IProperty property)
+    {
+        // 1. Explicit SQL default expression.
+        var defaultValueSql = property.GetDefaultValueSql();
+        if (!string.IsNullOrEmpty(defaultValueSql))
+        {
+            return defaultValueSql;
+        }
+
+        // 2. CLR default value set via HasDefaultValue().
+        var defaultValue = property.GetDefaultValue();
+        if (defaultValue != null)
+        {
+            return ConvertToSqlLiteral(defaultValue);
+        }
+
+        // 3. Reflection-based fallback for NOT NULL columns only.
+        if (!property.IsNullable && property.PropertyInfo != null && !property.IsPrimaryKey())
+        {
+            return TryGetPropertyInitializerDefault(property);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Attempts to derive a SQL default value by creating an instance of the declaring CLR
+    /// type and reading the property's initializer value via reflection.  Returns <c>null</c>
+    /// when no stable default can be determined.
+    /// </summary>
+    private string? TryGetPropertyInitializerDefault(IProperty property)
+    {
+        try
+        {
+            // DateTime/DateTimeOffset initializers (e.g. DateTime.UtcNow) yield the value at
+            // the moment of instantiation – not a stable SQL default.  Skip them so that the
+            // developer can explicitly call HasDefaultValueSql("GETDATE()") instead.
+            var underlyingType = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+            if (underlyingType == typeof(DateTime) || underlyingType == typeof(DateTimeOffset))
+            {
+                return null;
+            }
+
+            var entityClrType = property.DeclaringType.ClrType;
+            if (entityClrType.GetConstructor(Type.EmptyTypes) == null)
+            {
+                return null;
+            }
+
+            var instance = Activator.CreateInstance(entityClrType);
+            if (instance == null)
+            {
+                return null;
+            }
+
+            var value = property.PropertyInfo!.GetValue(instance);
+            if (value == null)
+            {
+                return null;
+            }
+
+            // Ignore values that are the CLR type's zero/default (0, false, Guid.Empty, …)
+            // because they are almost certainly not intentional database defaults.
+            var clrTypeDefault = underlyingType.IsValueType ? Activator.CreateInstance(underlyingType) : null;
+            if (value.Equals(clrTypeDefault))
+            {
+                return null;
+            }
+
+            // Ignore empty strings – they are rarely an intentional default constraint.
+            if (value is string s && string.IsNullOrEmpty(s))
+            {
+                return null;
+            }
+
+            var literal = ConvertToSqlLiteral(value);
+            if (literal != null)
+            {
+                Log($"  Using reflection-based default for [{property.DeclaringType.ClrType.Name}].[{property.Name}]: {literal}");
+            }
+            return literal;
+        }
+        catch
+        {
+            // If anything goes wrong (no parameterless ctor, property throws, etc.) just
+            // skip the reflection default rather than crashing DACPAC generation.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Converts a CLR value to a SQL literal string suitable for use inside DEFAULT (...).
+    /// Returns <c>null</c> for types that cannot be represented as a literal.
+    /// </summary>
+    private static string? ConvertToSqlLiteral(object value)
+    {
+        return value switch
+        {
+            string s    => $"'{s.Replace("'", "''")}'",
+            bool b      => b ? "1" : "0",
+            byte by     => by.ToString(CultureInfo.InvariantCulture),
+            short sh    => sh.ToString(CultureInfo.InvariantCulture),
+            int i       => i.ToString(CultureInfo.InvariantCulture),
+            long l      => l.ToString(CultureInfo.InvariantCulture),
+            decimal d   => d.ToString(CultureInfo.InvariantCulture),
+            double dbl  => dbl.ToString("G17", CultureInfo.InvariantCulture),
+            float f     => f.ToString("G9", CultureInfo.InvariantCulture),
+            Guid g      => $"'{g}'",
+            _           => null
+        };
     }
 
     private void CreateIndexes(TSqlModel model, IEntityType entityType)

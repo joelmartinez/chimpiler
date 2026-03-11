@@ -443,6 +443,88 @@ public class JsonOwnedOrganization
 }
 
 /// <summary>
+/// Test database with columns that have default values – represents the scenario
+/// of adding a new NOT NULL column to an existing table that already has rows.
+/// The DACPAC must include DEFAULT constraints so that sqldeploy does not fail.
+/// </summary>
+public class DefaultValuesContext : DbContext
+{
+    public DbSet<WorkItem> WorkItems { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=DefaultValuesDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<WorkItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(200);
+            // Non-nullable string with CLR default value configured via HasDefaultValue
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("pending");
+            // Non-nullable datetime with SQL default expression
+            entity.Property(e => e.CreatedAt).IsRequired().HasDefaultValueSql("GETDATE()");
+            // Non-nullable int with numeric CLR default
+            entity.Property(e => e.Priority).IsRequired().HasDefaultValue(1);
+        });
+    }
+}
+
+public class WorkItem
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Status { get; set; } = "pending";
+    public DateTime CreatedAt { get; set; }
+    public int Priority { get; set; }
+}
+
+/// <summary>
+/// Test database where NOT NULL columns carry only C# property initializers and no
+/// explicit HasDefaultValue() call.  The DACPAC generator should detect these via
+/// reflection and still emit DEFAULT constraints.
+/// </summary>
+public class PropertyInitializerContext : DbContext
+{
+    public DbSet<ProductItem> ProductItems { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=PropertyInitializerDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ProductItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            // Category and IsActive have C# initializers but no explicit HasDefaultValue
+            entity.Property(e => e.Category).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.IsActive).IsRequired();
+        });
+    }
+}
+
+public class ProductItem
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Has a non-empty string initializer that should become a DEFAULT constraint.</summary>
+    public string Category { get; set; } = "general";
+    /// <summary>Has a non-false bool initializer that should become a DEFAULT (1) constraint.</summary>
+    public bool IsActive { get; set; } = true;
+}
+
+/// <summary>
 /// Test database with multiple JSON-owned types including nested OwnsMany,
 /// similar to a real-world scenario where many fields are stored as JSON blobs.
 /// </summary>
