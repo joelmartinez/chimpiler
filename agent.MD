@@ -78,6 +78,9 @@ var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToL
 var columns = table.GetChildren()
     .Where(c => c.ObjectType == ModelSchema.Column).ToList();
 var isIdentity = column.GetProperty<bool>(Column.IsIdentity);
+// Note: IdentitySeed and IdentityIncrement are stored as strings in the DACPAC model
+var seed = column.GetProperty<string>(Column.IdentitySeed);       // e.g. "1000"
+var increment = column.GetProperty<string>(Column.IdentityIncrement); // e.g. "10"
 
 // Primary keys
 var pks = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.PrimaryKeyConstraint).ToList();
@@ -106,6 +109,8 @@ var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToLis
 | `HasDefaultValueSql(...)` sets `ValueGenerated.OnAdd` automatically | Same as above |
 | Owned types with `.ToJson()` have no separate table | FK from owner to owned type must be skipped |
 | `GetDefaultValue()` returns CLR default for value types | Use `GetValueGenerationStrategy()` for reliable identity detection |
+| `GetIdentitySeed()` / `GetIdentityIncrement()` throw on the runtime model | Use the design-time model via `context.GetInfrastructure().GetService<IDesignTimeModel>()` |
+| `Column.IdentitySeed` / `Column.IdentityIncrement` in the DACPAC model are `string`, not numeric | Use `GetProperty<string>(Column.IdentitySeed)` in tests |
 
 ---
 

@@ -503,6 +503,46 @@ public class DacpacGeneratorTests : IDisposable
     }
 
     [Fact]
+    public void GenerateDacpac_CustomIdentitySeed_ShouldEmitCorrectSeedAndIncrement()
+    {
+        // Arrange – verifies that UseIdentityColumn(seed, increment) values are honoured
+        // and not silently replaced with the default IDENTITY(1,1).
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "CustomIdentitySeed.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(CustomIdentitySeedContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+
+        // Tickets.Id: UseIdentityColumn(seed: 1000, increment: 1) → IDENTITY(1000,1)
+        var ticketsTable = tables.Single(t => t.Name.Parts.Any(p => p == "Tickets"));
+        var ticketIdCol = ticketsTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column)
+            .Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(ticketIdCol.GetProperty<bool>(Column.IsIdentity),
+            "Tickets.Id should be an IDENTITY column");
+        Assert.Equal("1000", ticketIdCol.GetProperty<string>(Column.IdentitySeed));
+        Assert.Equal("1", ticketIdCol.GetProperty<string>(Column.IdentityIncrement));
+
+        // AuditLogs.Id: UseIdentityColumn(seed: 1, increment: 10) → IDENTITY(1,10)
+        var auditTable = tables.Single(t => t.Name.Parts.Any(p => p == "AuditLogs"));
+        var auditIdCol = auditTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column)
+            .Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(auditIdCol.GetProperty<bool>(Column.IsIdentity),
+            "AuditLogs.Id should be an IDENTITY column");
+        Assert.Equal("1", auditIdCol.GetProperty<string>(Column.IdentitySeed));
+        Assert.Equal("10", auditIdCol.GetProperty<string>(Column.IdentityIncrement));
+    }
+
+    [Fact]
     public void GenerateDacpac_ExplicitDefaultValueColumns_ShouldNotBeIdentity()
     {
         // Arrange – verifies that int columns that have an explicit HasDefaultValue()

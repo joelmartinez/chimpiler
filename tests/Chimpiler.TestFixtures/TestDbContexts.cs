@@ -716,3 +716,53 @@ public class EmployeeNote
     public string NoteText { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>
+/// Test database with identity columns that use custom seed and increment values,
+/// e.g. IDENTITY(1000, 1) and IDENTITY(1, 10), to ensure non-default values are
+/// preserved in the DACPAC.
+/// </summary>
+public class CustomIdentitySeedContext : DbContext
+{
+    public DbSet<Ticket> Tickets { get; set; } = null!;
+    public DbSet<AuditLog> AuditLogs { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=CustomIdentitySeedDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // Ticket IDs start at 1000 so they are visually distinct from other entity IDs
+        modelBuilder.Entity<Ticket>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityColumn(seed: 1000, increment: 1);
+            entity.Property(e => e.Subject).IsRequired().HasMaxLength(200);
+        });
+
+        // AuditLog uses an increment of 10 (unusual but valid)
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityColumn(seed: 1, increment: 10);
+            entity.Property(e => e.Message).IsRequired();
+        });
+    }
+}
+
+public class Ticket
+{
+    public int Id { get; set; }
+    public string Subject { get; set; } = string.Empty;
+}
+
+public class AuditLog
+{
+    public int Id { get; set; }
+    public string Message { get; set; } = string.Empty;
+}

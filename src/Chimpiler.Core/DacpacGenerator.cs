@@ -2,7 +2,10 @@ using System.Data;
 using System.Globalization;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SqlServer.Dac.Model;
 using SqlServerValueGenerationStrategy = Microsoft.EntityFrameworkCore.Metadata.SqlServerValueGenerationStrategy;
 
@@ -45,7 +48,10 @@ public class DacpacGenerator
         // Create and use the DbContext to get the model
         using (var context = CreateDbContext(dbContextType))
         {
-            var model = context.Model;
+            // Prefer the design-time model: it retains additional metadata (such as custom
+            // identity seed/increment values) that the read-optimized runtime model strips.
+            var designTimeModel = context.GetInfrastructure().GetService<IDesignTimeModel>();
+            var model = designTimeModel?.Model ?? context.Model;
 
             // Generate schema objects from the EF Core model
             GenerateSchemaObjects(sqlModel, model, databaseName);
@@ -220,7 +226,23 @@ public class DacpacGenerator
 
         if (isIdentity)
         {
-            sb.Append(" IDENTITY(1,1)");
+            // Read the configured seed and increment from the design-time model.
+            // GetIdentitySeed()/GetIdentityIncrement() require the design-time model;
+            // they throw on the read-optimised runtime model.  We call them inside a
+            // try/catch so that a fallback of IDENTITY(1,1) is used when the design-time
+            // model is unavailable for any reason.
+            long seed = 1;
+            int increment = 1;
+            try
+            {
+                seed = property.GetIdentitySeed() ?? 1;
+                increment = property.GetIdentityIncrement() ?? 1;
+            }
+            catch (InvalidOperationException)
+            {
+                // Runtime-only model: fall back to defaults
+            }
+            sb.Append($" IDENTITY({seed},{increment})");
         }
 
         sb.Append(isNullable ? " NULL" : " NOT NULL");
