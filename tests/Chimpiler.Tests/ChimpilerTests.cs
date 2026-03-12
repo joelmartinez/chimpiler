@@ -450,6 +450,145 @@ public class DacpacGeneratorTests : IDisposable
         // The generator must have logged that it used reflection-based defaults
         Assert.Contains(logMessages, m => m.Contains("reflection-based default"));
     }
+
+    [Fact]
+    public void GenerateDacpac_IdentityColumns_ShouldHaveIdentityFlag()
+    {
+        // Arrange – verifies that int and long primary-key columns (the most common SQL Server
+        // identity pattern) are emitted with IDENTITY(1,1) rather than as plain int columns.
+        // This is a regression test for the bug where GetDefaultValue() returning the CLR
+        // default (0) instead of null caused the identity check to always evaluate to false.
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "IdentityAndRelationships.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(IdentityAndRelationshipsContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        Assert.NotNull(model);
+
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+
+        // Verify int identity PK (Departments.Id)
+        var deptTable = tables.Single(t => t.Name.Parts.Any(p => p == "Departments"));
+        var deptColumns = deptTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column).ToList();
+        var deptIdCol = deptColumns.Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(deptIdCol.GetProperty<bool>(Column.IsIdentity),
+            "Departments.Id should be an IDENTITY column");
+
+        // Verify int identity PK (Employees.Id)
+        var empTable = tables.Single(t => t.Name.Parts.Any(p => p == "Employees"));
+        var empColumns = empTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column).ToList();
+        var empIdCol = empColumns.Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(empIdCol.GetProperty<bool>(Column.IsIdentity),
+            "Employees.Id (int) should be an IDENTITY column");
+
+        // Non-PK int columns must NOT be marked as identity
+        var deptIdFkCol = empColumns.Single(c => c.Name.Parts.Last() == "DepartmentId");
+        Assert.False(deptIdFkCol.GetProperty<bool>(Column.IsIdentity),
+            "Employees.DepartmentId (FK) must not be an IDENTITY column");
+
+        // Verify long identity PK (EmployeeNotes.Id)
+        var noteTable = tables.Single(t => t.Name.Parts.Any(p => p == "EmployeeNotes"));
+        var noteColumns = noteTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column).ToList();
+        var noteIdCol = noteColumns.Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(noteIdCol.GetProperty<bool>(Column.IsIdentity),
+            "EmployeeNotes.Id (long/bigint) should be an IDENTITY column");
+    }
+
+    [Fact]
+    public void GenerateDacpac_ExplicitDefaultValueColumns_ShouldNotBeIdentity()
+    {
+        // Arrange – verifies that int columns that have an explicit HasDefaultValue()
+        // configured are NOT treated as IDENTITY columns.  This distinguishes between
+        // "auto-increment PK" (identity) and "column with a default value" (DEFAULT constraint).
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "DefaultValues.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(DefaultValuesContext), outputPath);
+
+        // Assert
+        Assert.True(File.Exists(outputPath), "DACPAC file should exist");
+
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        var tables = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Table).ToList();
+        var workTable = tables.Single(t => t.Name.Parts.Any(p => p == "WorkItems"));
+        var columns = workTable.GetChildren()
+            .Where(c => c.ObjectType == ModelSchema.Column).ToList();
+
+        // WorkItems.Id is a conventional int PK → must be identity
+        var idCol = columns.Single(c => c.Name.Parts.Last() == "Id");
+        Assert.True(idCol.GetProperty<bool>(Column.IsIdentity),
+            "WorkItems.Id should be an IDENTITY column");
+
+        // WorkItems.Priority has HasDefaultValue(1) → must NOT be identity, just DEFAULT (1)
+        var priorityCol = columns.Single(c => c.Name.Parts.Last() == "Priority");
+        Assert.False(priorityCol.GetProperty<bool>(Column.IsIdentity),
+            "WorkItems.Priority (HasDefaultValue(1)) must not be an IDENTITY column");
+
+        // DEFAULT constraints must be present for Status, CreatedAt, and Priority
+        var defaultConstraints = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.DefaultConstraint).ToList();
+        Assert.True(defaultConstraints.Count >= 3,
+            $"Expected at least 3 DEFAULT constraints, found {defaultConstraints.Count}");
+    }
+
+    [Fact]
+    public void GenerateDacpac_PrimaryKeys_ShouldBeGeneratedForAllTables()
+    {
+        // Arrange – validates that PRIMARY KEY constraints are present for every table
+        // with a single-column and composite PK scenario.
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "IdentityAndRelationships.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(IdentityAndRelationshipsContext), outputPath);
+
+        // Assert
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        var primaryKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.PrimaryKeyConstraint).ToList();
+
+        // All three tables must have a primary key
+        Assert.True(primaryKeys.Count >= 3,
+            $"Expected primary keys for Departments, Employees, and EmployeeNotes but found {primaryKeys.Count}");
+    }
+
+    [Fact]
+    public void GenerateDacpac_ForeignKeys_ShouldBeGeneratedWithCorrectBehavior()
+    {
+        // Arrange – verifies FK constraints (including ON DELETE behavior) for a
+        // multi-table schema.  Employee → Department (RESTRICT) and
+        // EmployeeNote → Employee (CASCADE).
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "IdentityAndRelationships.dacpac");
+
+        // Act
+        generator.GenerateDacpac(typeof(IdentityAndRelationshipsContext), outputPath);
+
+        // Assert
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+        var foreignKeys = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.ForeignKeyConstraint).ToList();
+
+        // Two FKs expected: Employee→Department and EmployeeNote→Employee
+        Assert.True(foreignKeys.Count >= 2,
+            $"Expected at least 2 foreign key constraints, found {foreignKeys.Count}");
+
+        // FK from Employees to Departments must exist
+        Assert.Contains(foreignKeys, fk => fk.Name.Parts.Any(p =>
+            p.Contains("Employees", StringComparison.OrdinalIgnoreCase) &&
+            p.Contains("Department", StringComparison.OrdinalIgnoreCase)));
+
+        // FK from EmployeeNotes to Employees must exist
+        Assert.Contains(foreignKeys, fk => fk.Name.Parts.Any(p =>
+            p.Contains("EmployeeNote", StringComparison.OrdinalIgnoreCase) &&
+            p.Contains("Employee", StringComparison.OrdinalIgnoreCase)));
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable

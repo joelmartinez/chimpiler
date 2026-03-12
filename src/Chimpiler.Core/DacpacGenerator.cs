@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.SqlServer.Dac.Model;
+using SqlServerValueGenerationStrategy = Microsoft.EntityFrameworkCore.Metadata.SqlServerValueGenerationStrategy;
 
 namespace Chimpiler.Core;
 
@@ -208,10 +209,11 @@ public class DacpacGenerator
         var columnName = property.GetColumnName();
         var columnType = property.GetColumnType();
         var isNullable = property.IsNullable;
-        var isIdentity = property.ValueGenerated == ValueGenerated.OnAdd && 
-                        (property.ClrType == typeof(int) || property.ClrType == typeof(long)) &&
-                        property.GetDefaultValue() == null &&
-                        string.IsNullOrEmpty(property.GetDefaultValueSql());
+        // Use the SQL Server value generation strategy to reliably detect identity columns.
+        // Checking GetDefaultValue() == null is insufficient because EF Core returns the CLR
+        // default (e.g. 0 for int) instead of null for value-type properties that have no
+        // explicit default configured, which caused the isIdentity detection to always be false.
+        var isIdentity = property.GetValueGenerationStrategy() == SqlServerValueGenerationStrategy.IdentityColumn;
 
         var sb = new StringBuilder();
         sb.Append($"[{columnName}] {columnType}");

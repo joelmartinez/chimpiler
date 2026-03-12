@@ -640,3 +640,79 @@ public class MjoMilestone
     public string Name { get; set; } = string.Empty;
     public int WeekOffset { get; set; }
 }
+
+/// <summary>
+/// Test database that exercises IDENTITY(1,1) columns, primary keys, and foreign keys
+/// so regressions in any of these common patterns are caught immediately.
+/// </summary>
+public class IdentityAndRelationshipsContext : DbContext
+{
+    public DbSet<Department> Departments { get; set; } = null!;
+    public DbSet<Employee> Employees { get; set; } = null!;
+    public DbSet<EmployeeNote> EmployeeNotes { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=IdentityAndRelationshipsDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Department>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<Employee>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FirstName).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.LastName).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.HireDate).IsRequired();
+
+            entity.HasOne<Department>()
+                .WithMany()
+                .HasForeignKey(e => e.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<EmployeeNote>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.NoteText).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+
+            entity.HasOne<Employee>()
+                .WithMany()
+                .HasForeignKey(e => e.EmployeeId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+}
+
+public class Department
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+public class Employee
+{
+    public int Id { get; set; }
+    public int DepartmentId { get; set; }
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public DateTime HireDate { get; set; }
+}
+
+public class EmployeeNote
+{
+    public long Id { get; set; }
+    public int EmployeeId { get; set; }
+    public string NoteText { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
