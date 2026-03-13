@@ -583,7 +583,7 @@ public class DacpacGeneratorTests : IDisposable
     public void GenerateDacpac_PrimaryKeys_ShouldBeGeneratedForAllTables()
     {
         // Arrange – validates that PRIMARY KEY constraints are present for every table
-        // with a single-column and composite PK scenario.
+        // in IdentityAndRelationshipsContext (all three tables use single-column PKs).
         var generator = new DacpacGenerator();
         var outputPath = Path.Combine(_tempOutputDir, "IdentityAndRelationships.dacpac");
 
@@ -602,9 +602,9 @@ public class DacpacGeneratorTests : IDisposable
     [Fact]
     public void GenerateDacpac_ForeignKeys_ShouldBeGeneratedWithCorrectBehavior()
     {
-        // Arrange – verifies FK constraints (including ON DELETE behavior) for a
-        // multi-table schema.  Employee → Department (RESTRICT) and
-        // EmployeeNote → Employee (CASCADE).
+        // Arrange – verifies FK constraints including ON DELETE behavior:
+        //   Employee → Department uses EF Core Restrict, which maps to NO ACTION in SQL Server
+        //   EmployeeNote → Employee uses CASCADE
         var generator = new DacpacGenerator();
         var outputPath = Path.Combine(_tempOutputDir, "IdentityAndRelationships.dacpac");
 
@@ -619,15 +619,19 @@ public class DacpacGeneratorTests : IDisposable
         Assert.True(foreignKeys.Count >= 2,
             $"Expected at least 2 foreign key constraints, found {foreignKeys.Count}");
 
-        // FK from Employees to Departments must exist
-        Assert.Contains(foreignKeys, fk => fk.Name.Parts.Any(p =>
+        // FK from Employees to Departments must exist with NO ACTION (RESTRICT) delete behavior
+        var empToDeptFk = foreignKeys.SingleOrDefault(fk => fk.Name.Parts.Any(p =>
             p.Contains("Employees", StringComparison.OrdinalIgnoreCase) &&
             p.Contains("Department", StringComparison.OrdinalIgnoreCase)));
+        Assert.NotNull(empToDeptFk);
+        Assert.Equal(ForeignKeyAction.NoAction, empToDeptFk.GetProperty<ForeignKeyAction>(ForeignKeyConstraint.DeleteAction));
 
-        // FK from EmployeeNotes to Employees must exist
-        Assert.Contains(foreignKeys, fk => fk.Name.Parts.Any(p =>
+        // FK from EmployeeNotes to Employees must exist with CASCADE delete behavior
+        var notesToEmpFk = foreignKeys.SingleOrDefault(fk => fk.Name.Parts.Any(p =>
             p.Contains("EmployeeNote", StringComparison.OrdinalIgnoreCase) &&
             p.Contains("Employee", StringComparison.OrdinalIgnoreCase)));
+        Assert.NotNull(notesToEmpFk);
+        Assert.Equal(ForeignKeyAction.Cascade, notesToEmpFk.GetProperty<ForeignKeyAction>(ForeignKeyConstraint.DeleteAction));
     }
 }
 

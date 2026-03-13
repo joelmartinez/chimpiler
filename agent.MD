@@ -104,11 +104,10 @@ var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToLis
 
 | Scenario | Symptom if missed |
 |----------|-------------------|
-| `GetDefaultValue()` returns `0` for `int` with no explicit default | Identity detection always false; `IDENTITY(1,1)` never emitted |
+| `GetDefaultValue()` returns the CLR default (e.g. `0` for `int`) instead of `null` when no explicit default is configured | Identity detection always false; `IDENTITY(1,1)` never emitted — use `GetValueGenerationStrategy()` for reliable identity detection |
 | `HasDefaultValue(n)` sets `ValueGenerated.OnAdd` automatically | An `int` column with a DEFAULT can look like an identity column if checked naively |
 | `HasDefaultValueSql(...)` sets `ValueGenerated.OnAdd` automatically | Same as above |
 | Owned types with `.ToJson()` have no separate table | FK from owner to owned type must be skipped |
-| `GetDefaultValue()` returns CLR default for value types | Use `GetValueGenerationStrategy()` for reliable identity detection |
 | `GetIdentitySeed()` / `GetIdentityIncrement()` throw on the runtime model | Use the design-time model via `context.GetInfrastructure().GetService<IDesignTimeModel>()` |
 | `Column.IdentitySeed` / `Column.IdentityIncrement` in the DACPAC model are `string`, not numeric | Use `GetProperty<string>(Column.IdentitySeed)` in tests |
 
