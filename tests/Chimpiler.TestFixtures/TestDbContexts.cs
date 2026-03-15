@@ -766,3 +766,143 @@ public class AuditLog
     public int Id { get; set; }
     public string Message { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// Reproduces the failing scenario: a view that projects scalar columns together with
+/// an owned-JSON navigation whose JSON type also contains an OwnsMany collection.
+/// EF Core's LINQ translator cannot convert such a projection to SQL via ToQueryString(),
+/// so the ViewSqlGenerator must fall back to expression-tree analysis.
+/// </summary>
+public class EnrollmentContext : DbContext
+{
+    public DbSet<EnrollmentRecord> EnrollmentRecords { get; set; } = null!;
+    public DbSet<RedactedEnrollmentView> RedactedEnrollmentViews { get; set; } = null!;
+    /// <summary>A sibling view that only projects scalar columns (must keep working).</summary>
+    public DbSet<EnrollmentSummaryView> EnrollmentSummaryViews { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=EnrollmentDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // ── Base table ──────────────────────────────────────────────────────────
+        modelBuilder.Entity<EnrollmentRecord>(entity =>
+        {
+            entity.ToTable("EnrollmentRecords");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityColumn();
+            entity.Property(e => e.TenantStudyId).IsRequired();
+            entity.Property(e => e.PseudonymousSubjectNumber).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.LastSeenAtUtc).IsRequired();
+
+            // Owned JSON payload – contains a nested OwnsMany collection
+            entity.OwnsOne(e => e.PlanPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.ScheduledItems);
+            });
+        });
+
+        // ── Scalar-only sibling view (must continue to work via ToQueryString) ─
+        modelBuilder.Entity<EnrollmentSummaryView>(entity =>
+        {
+            entity.ToView("EnrollmentSummaryView")
+                  .HasViewDefinition<EnrollmentSummaryView, EnrollmentContext>(ctx =>
+                      from e in ctx.EnrollmentRecords
+                      select new EnrollmentSummaryView
+                      {
+                          Id = e.Id,
+                          TenantStudyId = e.TenantStudyId,
+                          CreatedAtUtc = e.CreatedAtUtc
+                      });
+            entity.HasKey(v => v.Id);
+        });
+
+        // ── View that projects scalars + the JSON-owned navigation ──────────────
+        // This is the failing case: EF Core cannot translate PlanPayload = e.PlanPayload
+        // when PlanPayload is a ToJson()-owned type that also has an OwnsMany inside it.
+        modelBuilder.Entity<RedactedEnrollmentView>(entity =>
+        {
+            entity.ToView("RedactedEnrollmentView")
+                  .HasViewDefinition<RedactedEnrollmentView, EnrollmentContext>(ctx =>
+                      from e in ctx.EnrollmentRecords
+                      select new RedactedEnrollmentView
+                      {
+                          Id = e.Id,
+                          TenantStudyId = e.TenantStudyId,
+                          ScopedSubjectNumber = e.PseudonymousSubjectNumber,
+                          CreatedAtUtc = e.CreatedAtUtc,
+                          LastSeenAtUtc = e.LastSeenAtUtc,
+                          WithdrawnAtUtc = e.WithdrawnAtUtc,
+                          CompletedAtUtc = e.CompletedAtUtc,
+                          PlanPayload = e.PlanPayload
+                      })
+                  .WithSchemaBinding()
+                  .HasClusteredIndex(v => v.Id);
+
+            entity.HasKey(v => v.Id);
+
+            // The view also exposes the JSON column so it must carry the same ToJson mapping
+            entity.OwnsOne(v => v.PlanPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.ScheduledItems);
+            });
+        });
+    }
+}
+
+// ── Entity / value-object types ────────────────────────────────────────────────
+
+public class EnrollmentRecord
+{
+    public int Id { get; set; }
+    public int TenantStudyId { get; set; }
+    public int PseudonymousSubjectNumber { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime LastSeenAtUtc { get; set; }
+    public DateTime? WithdrawnAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public EnrollmentPlanPayload? PlanPayload { get; set; }
+}
+
+public class EnrollmentPlanPayload
+{
+    public string? PlanName { get; set; }
+    public DateTime? StartDate { get; set; }
+    public int? DurationDays { get; set; }
+    public List<ScheduledItem> ScheduledItems { get; set; } = new();
+}
+
+public class ScheduledItem
+{
+    public string Name { get; set; } = string.Empty;
+    public int DayOffset { get; set; }
+}
+
+// ── View projection types ───────────────────────────────────────────────────────
+
+public class EnrollmentSummaryView
+{
+    public int Id { get; set; }
+    public int TenantStudyId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+}
+
+public class RedactedEnrollmentView
+{
+    public int Id { get; set; }
+    public int TenantStudyId { get; set; }
+    public int ScopedSubjectNumber { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime LastSeenAtUtc { get; set; }
+    public DateTime? WithdrawnAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public EnrollmentPlanPayload? PlanPayload { get; set; }
+}

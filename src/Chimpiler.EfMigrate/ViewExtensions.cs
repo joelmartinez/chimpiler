@@ -11,6 +11,13 @@ public static class ViewAnnotations
 {
     public const string ViewDefinitionLambda = "Chimpiler:ViewDefinitionLambda";
     public const string ViewDefinitionContextType = "Chimpiler:ViewDefinitionContextType";
+    /// <summary>
+    /// Stores the original (uncompiled) <see cref="LambdaExpression"/> from
+    /// <see cref="ViewExtensions.HasViewDefinition{TEntity,TContext}"/>.
+    /// Used as a fallback when EF Core's LINQ translator cannot convert the compiled
+    /// query to SQL (e.g. projections that include owned-JSON navigation properties).
+    /// </summary>
+    public const string ViewDefinitionExpression = "Chimpiler:ViewDefinitionExpression";
     public const string ViewSql = "Chimpiler:ViewSql";
     public const string WithSchemaBinding = "Chimpiler:WithSchemaBinding";
     public const string ClusteredIndexExpression = "Chimpiler:ClusteredIndexExpression";
@@ -41,6 +48,11 @@ public static class ViewExtensions
         // Store the lambda and context type as annotations
         entityTypeBuilder.HasAnnotation(ViewAnnotations.ViewDefinitionLambda, compiledFunc);
         entityTypeBuilder.HasAnnotation(ViewAnnotations.ViewDefinitionContextType, typeof(TContext));
+        
+        // Also store the original uncompiled expression tree so the ViewSqlGenerator can
+        // fall back to expression-tree analysis when EF Core's LINQ translator cannot convert
+        // the compiled query to SQL (e.g. projections of owned-JSON navigation properties).
+        entityTypeBuilder.HasAnnotation(ViewAnnotations.ViewDefinitionExpression, queryBuilder);
         
         return entityTypeBuilder;
     }

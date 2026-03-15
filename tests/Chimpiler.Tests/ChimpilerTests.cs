@@ -633,6 +633,103 @@ public class DacpacGeneratorTests : IDisposable
         Assert.NotNull(notesToEmpFk);
         Assert.Equal(ForeignKeyAction.Cascade, notesToEmpFk.GetProperty<ForeignKeyAction>(ForeignKeyConstraint.DeleteAction));
     }
+
+    // ─── Regression: owned-JSON view projection ────────────────────────────────
+
+    /// <summary>
+    /// A view that projects only scalar columns from a table that also has an owned-JSON
+    /// navigation.  This is the "sibling view" case from the problem statement and must
+    /// continue to work via the normal EF Core ToQueryString() path.
+    /// </summary>
+    [Fact]
+    public void GenerateDacpac_ForScalarOnlyViewProjection_ShouldWork()
+    {
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+
+        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+
+        Assert.True(File.Exists(outputPath));
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "EnrollmentSummaryView"));
+
+        // The scalar-only view should have been generated via the normal ToQueryString() path,
+        // not the expression-tree fallback, so no fallback log message should appear for it.
+        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("EnrollmentSummaryView"));
+    }
+
+    /// <summary>
+    /// A view that projects scalar columns plus the owned-JSON navigation property itself.
+    /// EF Core's LINQ translator cannot produce SQL for this projection; the generator must
+    /// fall back to expression-tree analysis and emit the JSON column directly.
+    /// </summary>
+    [Fact]
+    public void GenerateDacpac_ForViewProjectingOwnedJsonNavigation_ShouldWork()
+    {
+        var logMessages = new List<string>();
+        var generator = new DacpacGenerator(msg => logMessages.Add(msg));
+        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+
+        // Must not throw even though EF Core cannot translate PlanPayload = e.PlanPayload
+        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+
+        Assert.True(File.Exists(outputPath));
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "RedactedEnrollmentView"));
+
+        // The expression-tree fallback log message should have been emitted
+        Assert.Contains(logMessages, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
+    }
+
+    /// <summary>
+    /// The owned-JSON type inside the view contains an OwnsMany collection.
+    /// Verifies that the JSON column name is correctly resolved from
+    /// <c>GetContainerColumnName()</c> even when the owned type is nested.
+    /// </summary>
+    [Fact]
+    public void GenerateDacpac_ForViewWithOwnedJsonContainingCollection_SelectsJsonColumn()
+    {
+        var logs = new List<string>();
+        using var ctx = new EnrollmentContext();
+        var viewEntityType = ctx.Model.FindEntityType(typeof(RedactedEnrollmentView))!;
+        var generator = new ViewSqlGenerator(msg => logs.Add(msg));
+
+        var viewDdl = generator.GenerateViewDdl(viewEntityType, ctx);
+
+        // The generated SELECT must include the PlanPayload JSON column
+        Assert.Contains("PlanPayload", viewDdl, StringComparison.OrdinalIgnoreCase);
+        // The view body must reference the source table
+        Assert.Contains("EnrollmentRecords", viewDdl, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The failing view uses WITH SCHEMABINDING and HasClusteredIndex.
+    /// Verifies that the full DACPAC (view + index) is generated correctly.
+    /// </summary>
+    [Fact]
+    public void GenerateDacpac_ForSchemaBindingIndexedViewWithJsonProjection_ShouldWork()
+    {
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+
+        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+
+        Assert.True(File.Exists(outputPath));
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
+        var redactedView = views.FirstOrDefault(v => v.Name.Parts.Any(p => p == "RedactedEnrollmentView"));
+        Assert.NotNull(redactedView);
+
+        // A unique clustered index must have been added for HasClusteredIndex(v => v.Id)
+        var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index).ToList();
+        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("RedactedEnrollmentView")));
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable
