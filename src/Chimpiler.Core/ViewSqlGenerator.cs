@@ -53,6 +53,7 @@ public class ViewSqlGenerator
         // Get the view definition lambda
         var lambda = entityType.FindAnnotation(ViewAnnotations.ViewDefinitionLambda)?.Value;
         var contextType = entityType.FindAnnotation(ViewAnnotations.ViewDefinitionContextType)?.Value as Type;
+        var definitionExpr = entityType.FindAnnotation(ViewAnnotations.ViewDefinitionExpression)?.Value as LambdaExpression;
 
         if (lambda == null || contextType == null)
         {
@@ -62,7 +63,7 @@ public class ViewSqlGenerator
         }
 
         // Generate SQL from the lambda
-        var viewSql = GenerateSqlFromLambda(lambda, context, contextType, entityType);
+        var viewSql = GenerateSqlFromLambda(lambda, context, contextType, entityType, definitionExpr);
 
         // Validate the SQL columns match the entity properties
         ValidateViewColumns(entityType, viewSql, viewName);
@@ -211,8 +212,10 @@ public class ViewSqlGenerator
         return columns;
     }
 
-    private string GenerateSqlFromLambda(object lambda, DbContext context, Type contextType, IEntityType entityType)
+    private string GenerateSqlFromLambda(object lambda, DbContext context, Type contextType, IEntityType entityType, LambdaExpression? definitionExpr = null)
     {
+        Exception? translationException = null;
+
         try
         {
             // Invoke the lambda to get the IQueryable
@@ -281,10 +284,213 @@ public class ViewSqlGenerator
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException(
-                $"Failed to generate SQL from view definition lambda for {entityType.Name}: {ex.Message}",
-                ex);
+            // Unwrap TargetInvocationException so we can inspect the real cause.
+            translationException = ex is TargetInvocationException tie && tie.InnerException != null
+                ? tie.InnerException
+                : ex;
         }
+
+        // ToQueryString() failed (e.g. the projection includes an owned-JSON navigation
+        // property whose collection members EF Core cannot translate to SQL).
+        // Fall back to building the SELECT statement directly from the expression tree
+        // and EF Core metadata – this handles the common pattern of projecting scalar columns
+        // together with a ToJson()-mapped owned navigation.
+        if (definitionExpr != null)
+        {
+            Log($"ToQueryString failed for {entityType.Name} ({translationException?.Message}); attempting expression-tree fallback.");
+            var fallbackSql = TryGenerateSqlFromExpressionTree(definitionExpr, context, entityType);
+            if (!string.IsNullOrEmpty(fallbackSql))
+            {
+                Log($"Expression-tree fallback succeeded for {entityType.Name}.");
+                return fallbackSql;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Failed to generate SQL from view definition lambda for {entityType.Name}: {translationException?.Message}",
+            translationException);
+    }
+
+    /// <summary>
+    /// Builds a SELECT statement for a simple single-table projection view by walking the
+    /// stored <see cref="LambdaExpression"/> instead of asking EF Core to translate it.
+    /// This handles projections that include owned-JSON navigation properties (ToJson()),
+    /// which EF Core's LINQ translator cannot convert to SQL when the JSON type contains
+    /// owned collection navigations.
+    ///
+    /// Supported shape:
+    ///   <c>ctx =&gt; ctx.SourceSet.Select(e =&gt; new TView { Prop = e.Prop, … })</c>
+    ///
+    /// Returns <c>null</c> when the expression shape is not recognised (callers should
+    /// then re-throw the original exception).
+    /// </summary>
+    internal string? TryGenerateSqlFromExpressionTree(
+        LambdaExpression definitionExpr,
+        DbContext context,
+        IEntityType viewEntityType)
+    {
+        // ── 1. Unpack  ctx => <body>  ───────────────────────────────────────────
+        var body = definitionExpr.Body;
+
+        // ── 2. Find the .Select(selector) call and the source DbSet access ──────
+        var (selectorLambda, sourceAccess) = ExtractSelectCall(body);
+        if (selectorLambda == null || sourceAccess == null)
+        {
+            Log($"Expression-tree fallback: could not locate a Select() call for {viewEntityType.Name}.");
+            return null;
+        }
+
+        // ── 3. Resolve source entity type from the DbSet<T> property ────────────
+        if (sourceAccess.Member is not PropertyInfo dbSetProp)
+            return null;
+
+        var dbSetType = dbSetProp.PropertyType;
+        if (!dbSetType.IsGenericType)
+            return null;
+
+        var sourceClrType = dbSetType.GetGenericArguments()[0];
+        var sourceEntityType = viewEntityType.Model.FindEntityType(sourceClrType);
+        if (sourceEntityType == null)
+            return null;
+
+        var sourceTable = sourceEntityType.GetTableName();
+        if (string.IsNullOrEmpty(sourceTable))
+            return null;
+
+        var sourceSchema = sourceEntityType.GetSchema() ?? "dbo";
+
+        // ── 4. Build the SELECT list from MemberInit bindings ───────────────────
+        if (selectorLambda.Body is not MemberInitExpression memberInit)
+            return null;
+
+        if (selectorLambda.Parameters.Count == 0)
+            return null;
+
+        var sourceParam = selectorLambda.Parameters[0];
+        var selectParts = new List<string>();
+
+        foreach (var binding in memberInit.Bindings)
+        {
+            if (binding is not MemberAssignment assignment)
+                return null; // unknown binding shape – bail
+
+            var part = ResolveColumnRef(
+                assignment.Expression,
+                sourceParam,
+                sourceEntityType,
+                viewEntityType,
+                assignment.Member.Name);
+
+            if (part == null)
+            {
+                Log($"Expression-tree fallback: could not resolve binding for '{assignment.Member.Name}' in {viewEntityType.Name}; abandoning fallback.");
+                return null;
+            }
+
+            selectParts.Add(part);
+        }
+
+        if (selectParts.Count == 0)
+            return null;
+
+        return $"SELECT {string.Join(", ", selectParts)}\nFROM [{sourceSchema}].[{sourceTable}]";
+    }
+
+    /// <summary>
+    /// Walks the expression to find the innermost <c>.Select(selector)</c> call and
+    /// returns the selector lambda together with the outermost source expression
+    /// (the <c>ctx.DbSetProperty</c> member access).
+    /// </summary>
+    private static (LambdaExpression? selector, MemberExpression? source) ExtractSelectCall(Expression expr)
+    {
+        // We expect: ctx.Source.Select(e => new TView { … })
+        // With possible intermediate Where/OrderBy/etc – for those we only support
+        // the simple single-table case where the root of the chain is a MemberExpression.
+        if (expr is not MethodCallExpression call || call.Method.Name != "Select" || call.Arguments.Count < 2)
+            return (null, null);
+
+        // Argument[1] is the selector, wrapped in a Quote node for Queryable.Select
+        var selectorArg = call.Arguments[1];
+        if (selectorArg is UnaryExpression unary && unary.NodeType == ExpressionType.Quote)
+            selectorArg = unary.Operand;
+
+        var selector = selectorArg as LambdaExpression;
+
+        // Walk up the chain to find the root source MemberExpression
+        var source = FindRootMemberAccess(call.Arguments[0]);
+
+        return (selector, source);
+    }
+
+    private static MemberExpression? FindRootMemberAccess(Expression expr)
+    {
+        if (expr is MemberExpression m)
+            return m;
+
+        // Unwrap extension-method chains (Where, AsNoTracking, etc.)
+        if (expr is MethodCallExpression mc && mc.Arguments.Count >= 1)
+            return FindRootMemberAccess(mc.Arguments[0]);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves a single member-binding source expression to its SQL column reference
+    /// string (e.g. <c>[ColumnName]</c> or <c>[SourceCol] AS [ViewCol]</c>).
+    /// Returns <c>null</c> if the expression cannot be resolved.
+    /// </summary>
+    private string? ResolveColumnRef(
+        Expression expr,
+        ParameterExpression sourceParam,
+        IEntityType sourceEntityType,
+        IEntityType viewEntityType,
+        string viewMemberName)
+    {
+        // Unwrap implicit casts introduced by the C# compiler
+        while (expr is UnaryExpression u &&
+               (u.NodeType == ExpressionType.Convert || u.NodeType == ExpressionType.ConvertChecked))
+        {
+            expr = u.Operand;
+        }
+
+        // We only handle direct member access on the source parameter: e.Property
+        if (expr is not MemberExpression memberAccess || memberAccess.Expression != sourceParam)
+            return null;
+
+        var sourceMemberName = memberAccess.Member.Name;
+
+        // ── Scalar property ─────────────────────────────────────────────────────
+        var sourceProperty = sourceEntityType.FindProperty(sourceMemberName);
+        if (sourceProperty != null)
+        {
+            var sourceCol = sourceProperty.GetColumnName();
+            var viewProperty = viewEntityType.FindProperty(viewMemberName);
+            var viewCol = viewProperty?.GetColumnName() ?? viewMemberName;
+            return sourceCol == viewCol
+                ? $"[{sourceCol}]"
+                : $"[{sourceCol}] AS [{viewCol}]";
+        }
+
+        // ── Owned-JSON navigation (ToJson()) ────────────────────────────────────
+        var sourceNav = sourceEntityType.FindNavigation(sourceMemberName);
+        if (sourceNav != null)
+        {
+            var targetType = sourceNav.TargetEntityType;
+            if (targetType.IsMappedToJson())
+            {
+                var sourceJsonCol = targetType.GetContainerColumnName() ?? sourceMemberName;
+
+                // Determine the column name on the view side
+                var viewNav = viewEntityType.FindNavigation(viewMemberName);
+                var viewJsonCol = viewNav?.TargetEntityType?.GetContainerColumnName() ?? viewMemberName;
+
+                return sourceJsonCol == viewJsonCol
+                    ? $"[{sourceJsonCol}]"
+                    : $"[{sourceJsonCol}] AS [{viewJsonCol}]";
+            }
+        }
+
+        return null;
     }
 
     private void ValidateViewColumns(IEntityType entityType, string sql, string viewName)

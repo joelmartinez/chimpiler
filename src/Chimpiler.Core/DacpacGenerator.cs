@@ -104,7 +104,13 @@ public class DacpacGenerator
             .Where(e => !e.IsOwned())
             .Where(e => !string.IsNullOrEmpty(e.GetTableName()))
             .ToList();
-        var views = allEntities.Where(e => ViewSqlGenerator.IsView(e)).ToList();
+        var views = allEntities
+            .Where(e => ViewSqlGenerator.IsView(e))
+            // Exclude owned entity types (e.g. ToJson()-mapped navigations) that inherit
+            // their owner's view name.  Only top-level view entity types have a
+            // ViewDefinitionLambda annotation and should produce DDL.
+            .Where(e => !e.IsOwned())
+            .ToList();
 
         // Create schemas
         var schemas = new HashSet<string>();
