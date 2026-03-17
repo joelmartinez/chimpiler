@@ -663,11 +663,12 @@ public class DacpacGeneratorTests : IDisposable
 
     /// <summary>
     /// A view that projects scalar columns plus the owned-JSON navigation property itself.
-    /// EF Core's LINQ translator cannot produce SQL for this projection; the generator must
-    /// fall back to expression-tree analysis and emit the JSON column directly.
+    /// EF Core rejects the tracked version of this query because it projects an owned type
+    /// without its owner, so the generator must retry with AsNoTracking() before considering
+    /// the expression-tree fallback.
     /// </summary>
     [Fact]
-    public void GenerateDacpac_ForViewProjectingOwnedJsonNavigation_ShouldWork()
+    public void GenerateDacpac_ForViewProjectingOwnedJsonNavigation_ShouldUseNoTrackingRetry()
     {
         var logMessages = new List<string>();
         var generator = new DacpacGenerator(msg => logMessages.Add(msg));
@@ -682,8 +683,8 @@ public class DacpacGeneratorTests : IDisposable
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
         Assert.Contains(views, v => v.Name.Parts.Any(p => p == "RedactedEnrollmentView"));
 
-        // The expression-tree fallback log message should have been emitted
-        Assert.Contains(logMessages, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
+        Assert.Contains(logMessages, m => m.Contains("No-tracking retry succeeded") && m.Contains("RedactedEnrollmentView"));
+        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
     }
 
     /// <summary>
@@ -705,6 +706,8 @@ public class DacpacGeneratorTests : IDisposable
         Assert.Contains("PlanPayload", viewDdl, StringComparison.OrdinalIgnoreCase);
         // The view body must reference the source table
         Assert.Contains("EnrollmentRecords", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(logs, m => m.Contains("No-tracking retry succeeded") && m.Contains("RedactedEnrollmentView"));
+        Assert.DoesNotContain(logs, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
     }
 
     /// <summary>

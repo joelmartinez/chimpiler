@@ -218,69 +218,8 @@ public class ViewSqlGenerator
 
         try
         {
-            // Invoke the lambda to get the IQueryable
-            var method = lambda.GetType().GetMethod("Invoke");
-            if (method == null)
-            {
-                throw new InvalidOperationException("Could not find Invoke method on lambda");
-            }
-
-            var queryable = method.Invoke(lambda, new[] { context });
-            if (queryable == null)
-            {
-                throw new InvalidOperationException("Lambda returned null");
-            }
-
-            // Use the EntityFrameworkQueryableExtensions.ToQueryString method
-            // This is available in EF Core and works on IQueryable<T>
-            var queryableType = queryable.GetType();
-            
-            // Find the ToQueryString method - it's an instance method in EF Core 5+
-            var toQueryStringMethod = queryableType.GetMethod("ToQueryString", 
-                BindingFlags.Public | BindingFlags.Instance, 
-                null, 
-                Type.EmptyTypes, 
-                null);
-            
-            if (toQueryStringMethod != null)
-            {
-                // EF Core 5+ - ToQueryString is an instance method
-                var sql = toQueryStringMethod.Invoke(queryable, null) as string;
-                if (!string.IsNullOrEmpty(sql))
-                {
-                    return sql;
-                }
-            }
-
-            // If instance method not found, try extension method approach
-            // Find EntityFrameworkQueryableExtensions.ToQueryString
-            var efAssembly = typeof(DbContext).Assembly;
-            var extensionsType = efAssembly.GetTypes()
-                .FirstOrDefault(t => t.Name == "EntityFrameworkQueryableExtensions" || 
-                                   t.Name == "RelationalQueryableExtensions");
-            
-            if (extensionsType != null)
-            {
-                var extensionMethod = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static)
-                    .FirstOrDefault(m => m.Name == "ToQueryString" && m.GetParameters().Length == 1);
-                
-                if (extensionMethod != null)
-                {
-                    // Make it generic if needed
-                    if (extensionMethod.IsGenericMethodDefinition)
-                    {
-                        extensionMethod = extensionMethod.MakeGenericMethod(entityType.ClrType);
-                    }
-                    
-                    var sql = extensionMethod.Invoke(null, new[] { queryable }) as string;
-                    if (!string.IsNullOrEmpty(sql))
-                    {
-                        return sql;
-                    }
-                }
-            }
-
-            throw new InvalidOperationException("Could not find ToQueryString method");
+            var queryable = InvokeViewDefinitionLambda(lambda, context);
+            return GenerateSqlFromQueryable(queryable, entityType);
         }
         catch (Exception ex)
         {
@@ -288,6 +227,24 @@ public class ViewSqlGenerator
             translationException = ex is TargetInvocationException tie && tie.InnerException != null
                 ? tie.InnerException
                 : ex;
+        }
+
+        if (definitionExpr != null)
+        {
+            try
+            {
+                var noTrackingQueryable = InvokeNoTrackingViewDefinitionLambda(definitionExpr, context);
+                var noTrackingSql = GenerateSqlFromQueryable(noTrackingQueryable, entityType);
+                Log($"No-tracking retry succeeded for {entityType.Name}.");
+                return noTrackingSql;
+            }
+            catch (Exception ex)
+            {
+                var noTrackingException = ex is TargetInvocationException tie && tie.InnerException != null
+                    ? tie.InnerException
+                    : ex;
+                Log($"No-tracking retry failed for {entityType.Name} ({noTrackingException.Message}).");
+            }
         }
 
         // ToQueryString() failed (e.g. the projection includes an owned-JSON navigation
@@ -309,6 +266,87 @@ public class ViewSqlGenerator
         throw new InvalidOperationException(
             $"Failed to generate SQL from view definition lambda for {entityType.Name}: {translationException?.Message}",
             translationException);
+    }
+
+    private static object InvokeViewDefinitionLambda(object lambda, DbContext context)
+    {
+        var method = lambda.GetType().GetMethod("Invoke");
+        if (method == null)
+        {
+            throw new InvalidOperationException("Could not find Invoke method on lambda");
+        }
+
+        var queryable = method.Invoke(lambda, new[] { context });
+        if (queryable == null)
+        {
+            throw new InvalidOperationException("Lambda returned null");
+        }
+
+        return queryable;
+    }
+
+    private static object InvokeNoTrackingViewDefinitionLambda(LambdaExpression definitionExpr, DbContext context)
+    {
+        var rewrittenBody = new NoTrackingDbSetVisitor().Visit(definitionExpr.Body)
+            ?? throw new InvalidOperationException("Failed to rewrite view definition expression.");
+
+        var rewrittenLambda = Expression.Lambda(rewrittenBody, definitionExpr.Parameters);
+        var queryable = rewrittenLambda.Compile().DynamicInvoke(context);
+        if (queryable == null)
+        {
+            throw new InvalidOperationException("No-tracking lambda returned null.");
+        }
+
+        return queryable;
+    }
+
+    private static string GenerateSqlFromQueryable(object queryable, IEntityType entityType)
+    {
+        var queryableType = queryable.GetType();
+
+        // Find the ToQueryString method - it's an instance method in EF Core 5+
+        var toQueryStringMethod = queryableType.GetMethod("ToQueryString",
+            BindingFlags.Public | BindingFlags.Instance,
+            null,
+            Type.EmptyTypes,
+            null);
+
+        if (toQueryStringMethod != null)
+        {
+            var sql = toQueryStringMethod.Invoke(queryable, null) as string;
+            if (!string.IsNullOrEmpty(sql))
+            {
+                return sql;
+            }
+        }
+
+        // If instance method not found, try extension method approach
+        var efAssembly = typeof(DbContext).Assembly;
+        var extensionsType = efAssembly.GetTypes()
+            .FirstOrDefault(t => t.Name == "EntityFrameworkQueryableExtensions" ||
+                               t.Name == "RelationalQueryableExtensions");
+
+        if (extensionsType != null)
+        {
+            var extensionMethod = extensionsType.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .FirstOrDefault(m => m.Name == "ToQueryString" && m.GetParameters().Length == 1);
+
+            if (extensionMethod != null)
+            {
+                if (extensionMethod.IsGenericMethodDefinition)
+                {
+                    extensionMethod = extensionMethod.MakeGenericMethod(entityType.ClrType);
+                }
+
+                var sql = extensionMethod.Invoke(null, new[] { queryable }) as string;
+                if (!string.IsNullOrEmpty(sql))
+                {
+                    return sql;
+                }
+            }
+        }
+
+        throw new InvalidOperationException("Could not find ToQueryString method");
     }
 
     /// <summary>
@@ -432,6 +470,30 @@ public class ViewSqlGenerator
             return FindRootMemberAccess(mc.Arguments[0]);
 
         return null;
+    }
+
+    private sealed class NoTrackingDbSetVisitor : ExpressionVisitor
+    {
+        protected override Expression VisitMember(MemberExpression node)
+        {
+            var visited = base.VisitMember(node);
+
+            if (visited is not MemberExpression memberExpr)
+                return visited;
+
+            if (!memberExpr.Type.IsGenericType || memberExpr.Type.GetGenericTypeDefinition() != typeof(DbSet<>))
+                return memberExpr;
+
+            var entityType = memberExpr.Type.GetGenericArguments()[0];
+            var asNoTrackingMethod = typeof(EntityFrameworkQueryableExtensions)
+                .GetMethods(BindingFlags.Public | BindingFlags.Static)
+                .First(m => m.Name == nameof(EntityFrameworkQueryableExtensions.AsNoTracking) &&
+                            m.IsGenericMethodDefinition &&
+                            m.GetParameters().Length == 1)
+                .MakeGenericMethod(entityType);
+
+            return Expression.Call(asNoTrackingMethod, memberExpr);
+        }
     }
 
     /// <summary>
