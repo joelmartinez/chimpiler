@@ -733,6 +733,40 @@ public class DacpacGeneratorTests : IDisposable
         var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index).ToList();
         Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("RedactedEnrollmentView")));
     }
+
+    [Fact]
+    public void GenerateViewDdl_ForJoinedViewWithJsonProjection_ShouldRestoreProjectionAliases()
+    {
+        using var ctx = new JoinedEnrollmentContext();
+        var viewEntityType = ctx.Model.FindEntityType(typeof(JoinedParticipantProfileView))!;
+        var logs = new List<string>();
+        var generator = new ViewSqlGenerator(msg => logs.Add(msg));
+
+        var viewDdl = generator.GenerateViewDdl(viewEntityType, ctx);
+
+        Assert.Contains("[PseudonymousSubjectNumber] AS [ScopedSubjectNumber]", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AS [BirthYear]", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(" AS [Id]", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(logs, m => m.Contains("Projection normalization trimmed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void GenerateDacpac_ForJoinedViewWithJsonProjectionAndCompositeIndex_ShouldWork()
+    {
+        var generator = new DacpacGenerator();
+        var outputPath = Path.Combine(_tempOutputDir, "JoinedEnrollment.dacpac");
+
+        generator.GenerateDacpac(typeof(JoinedEnrollmentContext), outputPath);
+
+        Assert.True(File.Exists(outputPath));
+        using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
+
+        var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "JoinedParticipantProfileView"));
+
+        var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index).ToList();
+        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("JoinedParticipantProfileView")));
+    }
 }
 
 public class EfMigrateServiceTests : IDisposable

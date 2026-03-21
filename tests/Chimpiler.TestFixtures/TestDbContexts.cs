@@ -906,3 +906,140 @@ public class RedactedEnrollmentView
     public DateTime? CompletedAtUtc { get; set; }
     public EnrollmentPlanPayload? PlanPayload { get; set; }
 }
+
+/// <summary>
+/// Reproduces a joined view where EF Core's SQL includes hidden materialization keys
+/// when JSON-owned projections and renamed/computed columns are present.
+/// </summary>
+public class JoinedEnrollmentContext : DbContext
+{
+    public DbSet<JoinedEnrollmentRecord> JoinedEnrollmentRecords { get; set; } = null!;
+    public DbSet<ParticipantProfileRecord> ParticipantProfileRecords { get; set; } = null!;
+    public DbSet<JoinedParticipantProfileView> JoinedParticipantProfileViews { get; set; } = null!;
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=JoinedEnrollmentDb;Trusted_Connection=True;");
+        }
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<JoinedEnrollmentRecord>(entity =>
+        {
+            entity.ToTable("JoinedEnrollmentRecords");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityColumn();
+            entity.Property(e => e.ParticipantId).IsRequired();
+            entity.Property(e => e.TenantStudyId).IsRequired();
+            entity.Property(e => e.PseudonymousSubjectNumber).IsRequired();
+            entity.Property(e => e.CreatedAtUtc).IsRequired();
+            entity.Property(e => e.LastSeenAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.TenantStudyId, e.PseudonymousSubjectNumber }).IsUnique();
+
+            entity.OwnsOne(e => e.PlanPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.ScheduledItems);
+            });
+        });
+
+        modelBuilder.Entity<ParticipantProfileRecord>(entity =>
+        {
+            entity.ToTable("ParticipantProfileRecords");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).UseIdentityColumn();
+            entity.Property(e => e.ParticipantId).IsRequired();
+            entity.HasIndex(e => e.ParticipantId).IsUnique();
+
+            entity.OwnsOne(e => e.BackgroundPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.Flags);
+            });
+        });
+
+        modelBuilder.Entity<JoinedParticipantProfileView>(entity =>
+        {
+            entity.ToView("JoinedParticipantProfileView")
+                .HasViewDefinition<JoinedParticipantProfileView, JoinedEnrollmentContext>(ctx =>
+                    from enrollment in ctx.JoinedEnrollmentRecords.AsNoTracking()
+                    join profile in ctx.ParticipantProfileRecords.AsNoTracking() on enrollment.ParticipantId equals profile.ParticipantId
+                    select new JoinedParticipantProfileView
+                    {
+                        TenantStudyId = enrollment.TenantStudyId,
+                        ScopedSubjectNumber = enrollment.PseudonymousSubjectNumber,
+                        BirthYear = profile.BirthDate.HasValue ? profile.BirthDate.Value.Year : 0,
+                        BackgroundPayload = profile.BackgroundPayload,
+                        CreatedAtUtc = enrollment.CreatedAtUtc,
+                        LastSeenAtUtc = enrollment.LastSeenAtUtc,
+                        WithdrawnAtUtc = enrollment.WithdrawnAtUtc,
+                        CompletedAtUtc = enrollment.CompletedAtUtc,
+                        PlanPayload = enrollment.PlanPayload
+                    })
+                .WithSchemaBinding()
+                .HasClusteredIndex(v => new { v.TenantStudyId, v.ScopedSubjectNumber });
+
+            entity.HasKey(v => new { v.TenantStudyId, v.ScopedSubjectNumber });
+
+            entity.OwnsOne(v => v.BackgroundPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.Flags);
+            });
+
+            entity.OwnsOne(v => v.PlanPayload, b =>
+            {
+                b.ToJson();
+                b.OwnsMany(p => p.ScheduledItems);
+            });
+        });
+    }
+}
+
+public class JoinedEnrollmentRecord
+{
+    public int Id { get; set; }
+    public int ParticipantId { get; set; }
+    public int TenantStudyId { get; set; }
+    public int PseudonymousSubjectNumber { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime LastSeenAtUtc { get; set; }
+    public DateTime? WithdrawnAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public EnrollmentPlanPayload? PlanPayload { get; set; }
+}
+
+public class ParticipantProfileRecord
+{
+    public int Id { get; set; }
+    public int ParticipantId { get; set; }
+    public DateTime? BirthDate { get; set; }
+    public ParticipantBackgroundPayload? BackgroundPayload { get; set; }
+}
+
+public class ParticipantBackgroundPayload
+{
+    public string? Summary { get; set; }
+    public List<ParticipantBackgroundFlag> Flags { get; set; } = new();
+}
+
+public class ParticipantBackgroundFlag
+{
+    public string Value { get; set; } = string.Empty;
+}
+
+public class JoinedParticipantProfileView
+{
+    public int TenantStudyId { get; set; }
+    public int ScopedSubjectNumber { get; set; }
+    public int BirthYear { get; set; }
+    public ParticipantBackgroundPayload? BackgroundPayload { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime LastSeenAtUtc { get; set; }
+    public DateTime? WithdrawnAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public EnrollmentPlanPayload? PlanPayload { get; set; }
+}
