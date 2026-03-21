@@ -646,19 +646,19 @@ public class DacpacGeneratorTests : IDisposable
     {
         var logMessages = new List<string>();
         var generator = new DacpacGenerator(msg => logMessages.Add(msg));
-        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Shipment.dacpac");
 
-        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+        generator.GenerateDacpac(typeof(ShipmentContext), outputPath);
 
         Assert.True(File.Exists(outputPath));
         using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
 
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "EnrollmentSummaryView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "ShipmentSummaryView"));
 
         // The scalar-only view should have been generated via the normal ToQueryString() path,
         // not the expression-tree fallback, so no fallback log message should appear for it.
-        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("EnrollmentSummaryView"));
+        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("ShipmentSummaryView"));
     }
 
     /// <summary>
@@ -672,19 +672,19 @@ public class DacpacGeneratorTests : IDisposable
     {
         var logMessages = new List<string>();
         var generator = new DacpacGenerator(msg => logMessages.Add(msg));
-        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Shipment.dacpac");
 
-        // Must not throw even though EF Core cannot translate PlanPayload = e.PlanPayload
-        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+        // Must not throw even though EF Core cannot translate ManifestPayload = e.ManifestPayload
+        generator.GenerateDacpac(typeof(ShipmentContext), outputPath);
 
         Assert.True(File.Exists(outputPath));
         using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
 
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "RedactedEnrollmentView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "ShipmentSnapshotView"));
 
-        Assert.Contains(logMessages, m => m.Contains("No-tracking retry succeeded") && m.Contains("RedactedEnrollmentView"));
-        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
+        Assert.Contains(logMessages, m => m.Contains("No-tracking retry succeeded") && m.Contains("ShipmentSnapshotView"));
+        Assert.DoesNotContain(logMessages, m => m.Contains("fallback") && m.Contains("ShipmentSnapshotView"));
     }
 
     /// <summary>
@@ -696,18 +696,18 @@ public class DacpacGeneratorTests : IDisposable
     public void GenerateDacpac_ForViewWithOwnedJsonContainingCollection_SelectsJsonColumn()
     {
         var logs = new List<string>();
-        using var ctx = new EnrollmentContext();
-        var viewEntityType = ctx.Model.FindEntityType(typeof(RedactedEnrollmentView))!;
+        using var ctx = new ShipmentContext();
+        var viewEntityType = ctx.Model.FindEntityType(typeof(ShipmentSnapshotView))!;
         var generator = new ViewSqlGenerator(msg => logs.Add(msg));
 
         var viewDdl = generator.GenerateViewDdl(viewEntityType, ctx);
 
-        // The generated SELECT must include the PlanPayload JSON column
-        Assert.Contains("PlanPayload", viewDdl, StringComparison.OrdinalIgnoreCase);
+        // The generated SELECT must include the ManifestPayload JSON column
+        Assert.Contains("ManifestPayload", viewDdl, StringComparison.OrdinalIgnoreCase);
         // The view body must reference the source table
-        Assert.Contains("EnrollmentRecords", viewDdl, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(logs, m => m.Contains("No-tracking retry succeeded") && m.Contains("RedactedEnrollmentView"));
-        Assert.DoesNotContain(logs, m => m.Contains("fallback") && m.Contains("RedactedEnrollmentView"));
+        Assert.Contains("ShipmentRecords", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(logs, m => m.Contains("No-tracking retry succeeded") && m.Contains("ShipmentSnapshotView"));
+        Assert.DoesNotContain(logs, m => m.Contains("fallback") && m.Contains("ShipmentSnapshotView"));
     }
 
     /// <summary>
@@ -718,34 +718,34 @@ public class DacpacGeneratorTests : IDisposable
     public void GenerateDacpac_ForSchemaBindingIndexedViewWithJsonProjection_ShouldWork()
     {
         var generator = new DacpacGenerator();
-        var outputPath = Path.Combine(_tempOutputDir, "Enrollment.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Shipment.dacpac");
 
-        generator.GenerateDacpac(typeof(EnrollmentContext), outputPath);
+        generator.GenerateDacpac(typeof(ShipmentContext), outputPath);
 
         Assert.True(File.Exists(outputPath));
         using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
 
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
-        var redactedView = views.FirstOrDefault(v => v.Name.Parts.Any(p => p == "RedactedEnrollmentView"));
-        Assert.NotNull(redactedView);
+        var shipmentView = views.FirstOrDefault(v => v.Name.Parts.Any(p => p == "ShipmentSnapshotView"));
+        Assert.NotNull(shipmentView);
 
         // A unique clustered index must have been added for HasClusteredIndex(v => v.Id)
         var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index).ToList();
-        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("RedactedEnrollmentView")));
+        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("ShipmentSnapshotView")));
     }
 
     [Fact]
     public void GenerateViewDdl_ForJoinedViewWithJsonProjection_ShouldRestoreProjectionAliases()
     {
-        using var ctx = new JoinedEnrollmentContext();
-        var viewEntityType = ctx.Model.FindEntityType(typeof(JoinedParticipantProfileView))!;
+        using var ctx = new ArcadeContext();
+        var viewEntityType = ctx.Model.FindEntityType(typeof(ArcadeLeaderboardView))!;
         var logs = new List<string>();
         var generator = new ViewSqlGenerator(msg => logs.Add(msg));
 
         var viewDdl = generator.GenerateViewDdl(viewEntityType, ctx);
 
-        Assert.Contains("[PseudonymousSubjectNumber] AS [ScopedSubjectNumber]", viewDdl, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("AS [BirthYear]", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[TicketNumber] AS [DisplayTicket]", viewDdl, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AS [MembershipYear]", viewDdl, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(" AS [Id]", viewDdl, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(logs, m => m.Contains("Projection normalization trimmed", StringComparison.OrdinalIgnoreCase));
     }
@@ -754,18 +754,18 @@ public class DacpacGeneratorTests : IDisposable
     public void GenerateDacpac_ForJoinedViewWithJsonProjectionAndCompositeIndex_ShouldWork()
     {
         var generator = new DacpacGenerator();
-        var outputPath = Path.Combine(_tempOutputDir, "JoinedEnrollment.dacpac");
+        var outputPath = Path.Combine(_tempOutputDir, "Arcade.dacpac");
 
-        generator.GenerateDacpac(typeof(JoinedEnrollmentContext), outputPath);
+        generator.GenerateDacpac(typeof(ArcadeContext), outputPath);
 
         Assert.True(File.Exists(outputPath));
         using var model = TSqlModel.LoadFromDacpac(outputPath, new ModelLoadOptions());
 
         var views = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.View).ToList();
-        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "JoinedParticipantProfileView"));
+        Assert.Contains(views, v => v.Name.Parts.Any(p => p == "ArcadeLeaderboardView"));
 
         var indexes = model.GetObjects(DacQueryScopes.UserDefined, ModelSchema.Index).ToList();
-        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("JoinedParticipantProfileView")));
+        Assert.Contains(indexes, idx => idx.Name.Parts.Any(p => p.Contains("ArcadeLeaderboardView")));
     }
 }
 

@@ -773,75 +773,75 @@ public class AuditLog
 /// EF Core's LINQ translator cannot convert such a projection to SQL via ToQueryString(),
 /// so the ViewSqlGenerator must fall back to expression-tree analysis.
 /// </summary>
-public class EnrollmentContext : DbContext
+public class ShipmentContext : DbContext
 {
-    public DbSet<EnrollmentRecord> EnrollmentRecords { get; set; } = null!;
-    public DbSet<RedactedEnrollmentView> RedactedEnrollmentViews { get; set; } = null!;
+    public DbSet<ShipmentRecord> ShipmentRecords { get; set; } = null!;
+    public DbSet<ShipmentSnapshotView> ShipmentSnapshotViews { get; set; } = null!;
     /// <summary>A sibling view that only projects scalar columns (must keep working).</summary>
-    public DbSet<EnrollmentSummaryView> EnrollmentSummaryViews { get; set; } = null!;
+    public DbSet<ShipmentSummaryView> ShipmentSummaryViews { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=EnrollmentDb;Trusted_Connection=True;");
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ShipmentDb;Trusted_Connection=True;");
         }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // ── Base table ──────────────────────────────────────────────────────────
-        modelBuilder.Entity<EnrollmentRecord>(entity =>
+        modelBuilder.Entity<ShipmentRecord>(entity =>
         {
-            entity.ToTable("EnrollmentRecords");
+            entity.ToTable("ShipmentRecords");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).UseIdentityColumn();
-            entity.Property(e => e.TenantStudyId).IsRequired();
-            entity.Property(e => e.PseudonymousSubjectNumber).IsRequired();
+            entity.Property(e => e.DepotId).IsRequired();
+            entity.Property(e => e.ParcelNumber).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.LastSeenAtUtc).IsRequired();
+            entity.Property(e => e.LastCheckpointAtUtc).IsRequired();
 
             // Owned JSON payload – contains a nested OwnsMany collection
-            entity.OwnsOne(e => e.PlanPayload, b =>
+            entity.OwnsOne(e => e.ManifestPayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.ScheduledItems);
+                b.OwnsMany(p => p.Checkpoints);
             });
         });
 
         // ── Scalar-only sibling view (must continue to work via ToQueryString) ─
-        modelBuilder.Entity<EnrollmentSummaryView>(entity =>
+        modelBuilder.Entity<ShipmentSummaryView>(entity =>
         {
-            entity.ToView("EnrollmentSummaryView")
-                  .HasViewDefinition<EnrollmentSummaryView, EnrollmentContext>(ctx =>
-                      from e in ctx.EnrollmentRecords
-                      select new EnrollmentSummaryView
+            entity.ToView("ShipmentSummaryView")
+                  .HasViewDefinition<ShipmentSummaryView, ShipmentContext>(ctx =>
+                      from e in ctx.ShipmentRecords
+                      select new ShipmentSummaryView
                       {
                           Id = e.Id,
-                          TenantStudyId = e.TenantStudyId,
+                          DepotId = e.DepotId,
                           CreatedAtUtc = e.CreatedAtUtc
                       });
             entity.HasKey(v => v.Id);
         });
 
         // ── View that projects scalars + the JSON-owned navigation ──────────────
-        // This is the failing case: EF Core cannot translate PlanPayload = e.PlanPayload
-        // when PlanPayload is a ToJson()-owned type that also has an OwnsMany inside it.
-        modelBuilder.Entity<RedactedEnrollmentView>(entity =>
+        // This is the failing case: EF Core cannot translate ManifestPayload = e.ManifestPayload
+        // when ManifestPayload is a ToJson()-owned type that also has an OwnsMany inside it.
+        modelBuilder.Entity<ShipmentSnapshotView>(entity =>
         {
-            entity.ToView("RedactedEnrollmentView")
-                  .HasViewDefinition<RedactedEnrollmentView, EnrollmentContext>(ctx =>
-                      from e in ctx.EnrollmentRecords
-                      select new RedactedEnrollmentView
+            entity.ToView("ShipmentSnapshotView")
+                  .HasViewDefinition<ShipmentSnapshotView, ShipmentContext>(ctx =>
+                      from e in ctx.ShipmentRecords
+                      select new ShipmentSnapshotView
                       {
                           Id = e.Id,
-                          TenantStudyId = e.TenantStudyId,
-                          ScopedSubjectNumber = e.PseudonymousSubjectNumber,
+                          DepotId = e.DepotId,
+                          RouteParcelNumber = e.ParcelNumber,
                           CreatedAtUtc = e.CreatedAtUtc,
-                          LastSeenAtUtc = e.LastSeenAtUtc,
-                          WithdrawnAtUtc = e.WithdrawnAtUtc,
-                          CompletedAtUtc = e.CompletedAtUtc,
-                          PlanPayload = e.PlanPayload
+                          LastCheckpointAtUtc = e.LastCheckpointAtUtc,
+                          CancelledAtUtc = e.CancelledAtUtc,
+                          DeliveredAtUtc = e.DeliveredAtUtc,
+                          ManifestPayload = e.ManifestPayload
                       })
                   .WithSchemaBinding()
                   .HasClusteredIndex(v => v.Id);
@@ -849,10 +849,10 @@ public class EnrollmentContext : DbContext
             entity.HasKey(v => v.Id);
 
             // The view also exposes the JSON column so it must carry the same ToJson mapping
-            entity.OwnsOne(v => v.PlanPayload, b =>
+            entity.OwnsOne(v => v.ManifestPayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.ScheduledItems);
+                b.OwnsMany(p => p.Checkpoints);
             });
         });
     }
@@ -860,186 +860,200 @@ public class EnrollmentContext : DbContext
 
 // ── Entity / value-object types ────────────────────────────────────────────────
 
-public class EnrollmentRecord
+public class ShipmentRecord
 {
     public int Id { get; set; }
-    public int TenantStudyId { get; set; }
-    public int PseudonymousSubjectNumber { get; set; }
+    public int DepotId { get; set; }
+    public int ParcelNumber { get; set; }
     public DateTime CreatedAtUtc { get; set; }
-    public DateTime LastSeenAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
-    public EnrollmentPlanPayload? PlanPayload { get; set; }
+    public DateTime LastCheckpointAtUtc { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public DateTime? DeliveredAtUtc { get; set; }
+    public ShipmentManifestPayload? ManifestPayload { get; set; }
 }
 
-public class EnrollmentPlanPayload
+public class ShipmentManifestPayload
 {
-    public string? PlanName { get; set; }
-    public DateTime? StartDate { get; set; }
-    public int? DurationDays { get; set; }
-    public List<ScheduledItem> ScheduledItems { get; set; } = new();
+    public string? RouteName { get; set; }
+    public DateTime? DispatchDate { get; set; }
+    public int? TotalMiles { get; set; }
+    public List<ManifestCheckpoint> Checkpoints { get; set; } = new();
 }
 
-public class ScheduledItem
+public class ManifestCheckpoint
 {
-    public string Name { get; set; } = string.Empty;
-    public int DayOffset { get; set; }
+    public string Label { get; set; } = string.Empty;
+    public int Sequence { get; set; }
 }
 
 // ── View projection types ───────────────────────────────────────────────────────
 
-public class EnrollmentSummaryView
+public class ShipmentSummaryView
 {
     public int Id { get; set; }
-    public int TenantStudyId { get; set; }
+    public int DepotId { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 }
 
-public class RedactedEnrollmentView
+public class ShipmentSnapshotView
 {
     public int Id { get; set; }
-    public int TenantStudyId { get; set; }
-    public int ScopedSubjectNumber { get; set; }
+    public int DepotId { get; set; }
+    public int RouteParcelNumber { get; set; }
     public DateTime CreatedAtUtc { get; set; }
-    public DateTime LastSeenAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
-    public EnrollmentPlanPayload? PlanPayload { get; set; }
+    public DateTime LastCheckpointAtUtc { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public DateTime? DeliveredAtUtc { get; set; }
+    public ShipmentManifestPayload? ManifestPayload { get; set; }
 }
 
 /// <summary>
 /// Reproduces a joined view where EF Core's SQL includes hidden materialization keys
 /// when JSON-owned projections and renamed/computed columns are present.
 /// </summary>
-public class JoinedEnrollmentContext : DbContext
+public class ArcadeContext : DbContext
 {
-    public DbSet<JoinedEnrollmentRecord> JoinedEnrollmentRecords { get; set; } = null!;
-    public DbSet<ParticipantProfileRecord> ParticipantProfileRecords { get; set; } = null!;
-    public DbSet<JoinedParticipantProfileView> JoinedParticipantProfileViews { get; set; } = null!;
+    public DbSet<ArcadeSessionRecord> ArcadeSessionRecords { get; set; } = null!;
+    public DbSet<PlayerProfileRecord> PlayerProfileRecords { get; set; } = null!;
+    public DbSet<ArcadeLeaderboardView> ArcadeLeaderboardViews { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=JoinedEnrollmentDb;Trusted_Connection=True;");
+            optionsBuilder.UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=ArcadeDb;Trusted_Connection=True;");
         }
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<JoinedEnrollmentRecord>(entity =>
+        modelBuilder.Entity<ArcadeSessionRecord>(entity =>
         {
-            entity.ToTable("JoinedEnrollmentRecords");
+            entity.ToTable("ArcadeSessionRecords");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).UseIdentityColumn();
-            entity.Property(e => e.ParticipantId).IsRequired();
-            entity.Property(e => e.TenantStudyId).IsRequired();
-            entity.Property(e => e.PseudonymousSubjectNumber).IsRequired();
+            entity.Property(e => e.PlayerId).IsRequired();
+            entity.Property(e => e.ArcadeId).IsRequired();
+            entity.Property(e => e.TicketNumber).IsRequired();
             entity.Property(e => e.CreatedAtUtc).IsRequired();
-            entity.Property(e => e.LastSeenAtUtc).IsRequired();
-            entity.HasIndex(e => new { e.TenantStudyId, e.PseudonymousSubjectNumber }).IsUnique();
+            entity.Property(e => e.LastPlayedAtUtc).IsRequired();
+            entity.HasIndex(e => new { e.ArcadeId, e.TicketNumber }).IsUnique();
 
-            entity.OwnsOne(e => e.PlanPayload, b =>
+            entity.OwnsOne(e => e.PrizeTrackPayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.ScheduledItems);
+                b.OwnsMany(p => p.RewardMilestones);
             });
         });
 
-        modelBuilder.Entity<ParticipantProfileRecord>(entity =>
+        modelBuilder.Entity<PlayerProfileRecord>(entity =>
         {
-            entity.ToTable("ParticipantProfileRecords");
+            entity.ToTable("PlayerProfileRecords");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).UseIdentityColumn();
-            entity.Property(e => e.ParticipantId).IsRequired();
-            entity.HasIndex(e => e.ParticipantId).IsUnique();
+            entity.Property(e => e.PlayerId).IsRequired();
+            entity.HasIndex(e => e.PlayerId).IsUnique();
 
-            entity.OwnsOne(e => e.BackgroundPayload, b =>
+            entity.OwnsOne(e => e.PreferencePayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.Flags);
+                b.OwnsMany(p => p.Badges);
             });
         });
 
-        modelBuilder.Entity<JoinedParticipantProfileView>(entity =>
+        modelBuilder.Entity<ArcadeLeaderboardView>(entity =>
         {
-            entity.ToView("JoinedParticipantProfileView")
-                .HasViewDefinition<JoinedParticipantProfileView, JoinedEnrollmentContext>(ctx =>
-                    from enrollment in ctx.JoinedEnrollmentRecords.AsNoTracking()
-                    join profile in ctx.ParticipantProfileRecords.AsNoTracking() on enrollment.ParticipantId equals profile.ParticipantId
-                    select new JoinedParticipantProfileView
+            entity.ToView("ArcadeLeaderboardView")
+                .HasViewDefinition<ArcadeLeaderboardView, ArcadeContext>(ctx =>
+                    from session in ctx.ArcadeSessionRecords.AsNoTracking()
+                    join profile in ctx.PlayerProfileRecords.AsNoTracking() on session.PlayerId equals profile.PlayerId
+                    select new ArcadeLeaderboardView
                     {
-                        TenantStudyId = enrollment.TenantStudyId,
-                        ScopedSubjectNumber = enrollment.PseudonymousSubjectNumber,
-                        BirthYear = profile.BirthDate.HasValue ? profile.BirthDate.Value.Year : 0,
-                        BackgroundPayload = profile.BackgroundPayload,
-                        CreatedAtUtc = enrollment.CreatedAtUtc,
-                        LastSeenAtUtc = enrollment.LastSeenAtUtc,
-                        WithdrawnAtUtc = enrollment.WithdrawnAtUtc,
-                        CompletedAtUtc = enrollment.CompletedAtUtc,
-                        PlanPayload = enrollment.PlanPayload
+                        ArcadeId = session.ArcadeId,
+                        DisplayTicket = session.TicketNumber,
+                        MembershipYear = profile.MemberSince.HasValue ? profile.MemberSince.Value.Year : 0,
+                        PreferencePayload = profile.PreferencePayload,
+                        CreatedAtUtc = session.CreatedAtUtc,
+                        LastPlayedAtUtc = session.LastPlayedAtUtc,
+                        ExpiredAtUtc = session.ExpiredAtUtc,
+                        RedeemedAtUtc = session.RedeemedAtUtc,
+                        PrizeTrackPayload = session.PrizeTrackPayload
                     })
                 .WithSchemaBinding()
-                .HasClusteredIndex(v => new { v.TenantStudyId, v.ScopedSubjectNumber });
+                .HasClusteredIndex(v => new { v.ArcadeId, v.DisplayTicket });
 
-            entity.HasKey(v => new { v.TenantStudyId, v.ScopedSubjectNumber });
+            entity.HasKey(v => new { v.ArcadeId, v.DisplayTicket });
 
-            entity.OwnsOne(v => v.BackgroundPayload, b =>
+            entity.OwnsOne(v => v.PreferencePayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.Flags);
+                b.OwnsMany(p => p.Badges);
             });
 
-            entity.OwnsOne(v => v.PlanPayload, b =>
+            entity.OwnsOne(v => v.PrizeTrackPayload, b =>
             {
                 b.ToJson();
-                b.OwnsMany(p => p.ScheduledItems);
+                b.OwnsMany(p => p.RewardMilestones);
             });
         });
     }
 }
 
-public class JoinedEnrollmentRecord
+public class ArcadeSessionRecord
 {
     public int Id { get; set; }
-    public int ParticipantId { get; set; }
-    public int TenantStudyId { get; set; }
-    public int PseudonymousSubjectNumber { get; set; }
+    public int PlayerId { get; set; }
+    public int ArcadeId { get; set; }
+    public int TicketNumber { get; set; }
     public DateTime CreatedAtUtc { get; set; }
-    public DateTime LastSeenAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
-    public EnrollmentPlanPayload? PlanPayload { get; set; }
+    public DateTime LastPlayedAtUtc { get; set; }
+    public DateTime? ExpiredAtUtc { get; set; }
+    public DateTime? RedeemedAtUtc { get; set; }
+    public PrizeTrackPayload? PrizeTrackPayload { get; set; }
 }
 
-public class ParticipantProfileRecord
+public class PlayerProfileRecord
 {
     public int Id { get; set; }
-    public int ParticipantId { get; set; }
-    public DateTime? BirthDate { get; set; }
-    public ParticipantBackgroundPayload? BackgroundPayload { get; set; }
+    public int PlayerId { get; set; }
+    public DateTime? MemberSince { get; set; }
+    public PlayerPreferencePayload? PreferencePayload { get; set; }
 }
 
-public class ParticipantBackgroundPayload
+public class PlayerPreferencePayload
 {
-    public string? Summary { get; set; }
-    public List<ParticipantBackgroundFlag> Flags { get; set; } = new();
+    public string? FavoriteGame { get; set; }
+    public List<PlayerBadge> Badges { get; set; } = new();
 }
 
-public class ParticipantBackgroundFlag
+public class PlayerBadge
 {
     public string Value { get; set; } = string.Empty;
 }
 
-public class JoinedParticipantProfileView
+public class PrizeTrackPayload
 {
-    public int TenantStudyId { get; set; }
-    public int ScopedSubjectNumber { get; set; }
-    public int BirthYear { get; set; }
-    public ParticipantBackgroundPayload? BackgroundPayload { get; set; }
+    public string? CampaignName { get; set; }
+    public DateTime? LaunchDate { get; set; }
+    public int? BonusPoints { get; set; }
+    public List<RewardMilestone> RewardMilestones { get; set; } = new();
+}
+
+public class RewardMilestone
+{
+    public string Title { get; set; } = string.Empty;
+    public int Threshold { get; set; }
+}
+
+public class ArcadeLeaderboardView
+{
+    public int ArcadeId { get; set; }
+    public int DisplayTicket { get; set; }
+    public int MembershipYear { get; set; }
+    public PlayerPreferencePayload? PreferencePayload { get; set; }
     public DateTime CreatedAtUtc { get; set; }
-    public DateTime LastSeenAtUtc { get; set; }
-    public DateTime? WithdrawnAtUtc { get; set; }
-    public DateTime? CompletedAtUtc { get; set; }
-    public EnrollmentPlanPayload? PlanPayload { get; set; }
+    public DateTime LastPlayedAtUtc { get; set; }
+    public DateTime? ExpiredAtUtc { get; set; }
+    public DateTime? RedeemedAtUtc { get; set; }
+    public PrizeTrackPayload? PrizeTrackPayload { get; set; }
 }
