@@ -64,6 +64,7 @@ public class ViewSqlGenerator
 
         // Generate SQL from the lambda
         var viewSql = GenerateSqlFromLambda(lambda, context, contextType, entityType, definitionExpr);
+        viewSql = NormalizeProjectedColumns(viewSql, entityType, definitionExpr);
 
         // Validate the SQL columns match the entity properties
         ValidateViewColumns(entityType, viewSql, viewName);
@@ -555,11 +556,199 @@ public class ViewSqlGenerator
         return null;
     }
 
+    private string NormalizeProjectedColumns(string sql, IEntityType entityType, LambdaExpression? definitionExpr)
+    {
+        if (definitionExpr == null)
+        {
+            return sql;
+        }
+
+        var projectedColumns = GetProjectedViewColumnNames(definitionExpr, entityType);
+        if (projectedColumns.Count == 0)
+        {
+            return sql;
+        }
+
+        if (!TrySplitSelectStatement(sql, out var selectClause, out var fromClause))
+        {
+            return sql;
+        }
+
+        var actualSelectParts = SplitSelectColumns(selectClause);
+        if (actualSelectParts.Count < projectedColumns.Count)
+        {
+            return sql;
+        }
+
+        var normalizedParts = new List<string>(projectedColumns.Count);
+        var changed = actualSelectParts.Count != projectedColumns.Count;
+
+        for (var i = 0; i < projectedColumns.Count; i++)
+        {
+            var normalizedPart = EnsureProjectionAlias(actualSelectParts[i], projectedColumns[i]);
+            normalizedParts.Add(normalizedPart);
+
+            if (!string.Equals(normalizedPart, actualSelectParts[i].Trim(), StringComparison.Ordinal))
+            {
+                changed = true;
+            }
+        }
+
+        if (!changed)
+        {
+            return sql;
+        }
+
+        if (actualSelectParts.Count > projectedColumns.Count)
+        {
+            Log($"Projection normalization trimmed {actualSelectParts.Count - projectedColumns.Count} hidden column(s) from {entityType.Name}.");
+        }
+
+        return $"SELECT {string.Join(", ", normalizedParts)} {fromClause}";
+    }
+
+    private static bool TrySplitSelectStatement(string sql, out string selectClause, out string fromClause)
+    {
+        var match = Regex.Match(
+            sql,
+            @"^\s*SELECT\s+(?<select>.*?)\s+(?<from>FROM\s+.*)$",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+        if (!match.Success)
+        {
+            selectClause = string.Empty;
+            fromClause = string.Empty;
+            return false;
+        }
+
+        selectClause = match.Groups["select"].Value;
+        fromClause = match.Groups["from"].Value.Trim();
+        return true;
+    }
+
+    private List<string> GetProjectedViewColumnNames(LambdaExpression definitionExpr, IEntityType viewEntityType)
+    {
+        var projectionLambda = ExtractProjectionLambda(definitionExpr.Body);
+        if (projectionLambda?.Body is not MemberInitExpression memberInit)
+        {
+            return [];
+        }
+
+        var projectedColumns = new List<string>(memberInit.Bindings.Count);
+        foreach (var binding in memberInit.Bindings)
+        {
+            if (binding is not MemberAssignment assignment)
+            {
+                return [];
+            }
+
+            projectedColumns.Add(GetViewColumnName(viewEntityType, assignment.Member.Name));
+        }
+
+        return projectedColumns;
+    }
+
+    private static LambdaExpression? ExtractProjectionLambda(Expression expr)
+    {
+        if (expr is not MethodCallExpression call)
+        {
+            return null;
+        }
+
+        if (call.Method.Name == "Select" && call.Arguments.Count >= 2)
+        {
+            return UnwrapQuotedLambda(call.Arguments[1]);
+        }
+
+        if (call.Method.Name == "Join" && call.Arguments.Count >= 5)
+        {
+            return UnwrapQuotedLambda(call.Arguments[4]);
+        }
+
+        return null;
+    }
+
+    private static LambdaExpression? UnwrapQuotedLambda(Expression expr)
+    {
+        if (expr is UnaryExpression unary && unary.NodeType == ExpressionType.Quote)
+        {
+            expr = unary.Operand;
+        }
+
+        return expr as LambdaExpression;
+    }
+
+    private string EnsureProjectionAlias(string selectPart, string expectedColumnName)
+    {
+        var trimmedPart = selectPart.Trim();
+        var actualOutputColumnName = ParseOutputColumnName(trimmedPart);
+        if (string.Equals(actualOutputColumnName, expectedColumnName, StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmedPart;
+        }
+
+        var expressionWithoutAlias = Regex.Replace(
+            trimmedPart,
+            @"\s+AS\s+\[[^\]]+\]\s*$",
+            string.Empty,
+            RegexOptions.IgnoreCase);
+
+        return $"{expressionWithoutAlias} AS [{expectedColumnName}]";
+    }
+
+    private string? ParseOutputColumnName(string selectPart)
+    {
+        var aliasMatch = Regex.Match(selectPart, @"AS\s+\[([^\]]+)\]\s*$", RegexOptions.IgnoreCase);
+        if (aliasMatch.Success)
+        {
+            return aliasMatch.Groups[1].Value;
+        }
+
+        var columnMatch = Regex.Match(selectPart, @"\[([^\]]+)\]\s*$");
+        return columnMatch.Success
+            ? columnMatch.Groups[1].Value
+            : null;
+    }
+
+    private IEnumerable<string> GetExpectedViewColumnNames(IEntityType entityType)
+    {
+        foreach (var property in entityType.GetProperties())
+        {
+            yield return property.GetColumnName();
+        }
+
+        foreach (var navigation in entityType.GetNavigations())
+        {
+            if (!navigation.TargetEntityType.IsMappedToJson())
+            {
+                continue;
+            }
+
+            yield return GetViewColumnName(entityType, navigation.Name);
+        }
+    }
+
+    private string GetViewColumnName(IEntityType viewEntityType, string memberName)
+    {
+        var property = viewEntityType.FindProperty(memberName);
+        if (property != null)
+        {
+            return property.GetColumnName();
+        }
+
+        var navigation = viewEntityType.FindNavigation(memberName);
+        if (navigation?.TargetEntityType.IsMappedToJson() == true)
+        {
+            return navigation.TargetEntityType.GetContainerColumnName() ?? memberName;
+        }
+
+        return memberName;
+    }
+
     private void ValidateViewColumns(IEntityType entityType, string sql, string viewName)
     {
         // Get expected columns from the entity
-        var expectedColumns = entityType.GetProperties()
-            .Select(p => p.GetColumnName())
+        var expectedColumns = GetExpectedViewColumnNames(entityType)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         // Parse SQL to get actual columns
