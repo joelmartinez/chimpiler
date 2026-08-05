@@ -38,9 +38,11 @@ cosine similarity is a single dot product at query time.
 ## Knowledge graph
 
 Indexing creates one `document` node per file and one `chunk` node per chunk, plus `section`
-nodes for markdown headings and code declarations. Edges express `contains`, `child`, `section`,
-`parent`, `references`, `symbol` and `type` relationships. Traversal loads the relevant edges and
-walks them in memory.
+nodes for markdown headings and code declarations. Each chunk also links to its strongest
+cross-document semantic neighbour when its cosine similarity is at least 0.55; small lexical
+overlap weighting avoids generic semantic hubs bypassing a more specific concept. Edges express
+`contains`, `child`, `section`, `semantic`, `parent`, `references`, `symbol` and `type`
+relationships. Traversal loads the relevant edges and walks them in memory.
 
 ```
 Document
@@ -76,11 +78,11 @@ chimpiler kb models remove bge-small-en-v1.5
 | Model | Dimension | Notes |
 |-------|-----------|-------|
 | `bge-small-en-v1.5` (default) | 384 | BAAI bge-small-en-v1.5, ~130 MB, excellent English retrieval quality per byte |
-| `nomic-embed-text-v1.5` | 768 | Long-context model, ~550 MB |
-
-Models are downloaded from Hugging Face into `~/.chimpiler/kb/models/<model-id>/` and are reused
-by every project on the machine. Downloads are written to a temporary file first, so an
-interrupted download never looks like a valid install.
+Models are downloaded from a pinned Hugging Face revision into `~/.chimpiler/kb/models/<model-id>/`
+and are reused by every project on the machine. Downloads are written to a temporary file first and
+verified against the pinned SHA-256 checksum before installation. The model's WordPiece `vocab.txt`
+is a fixed tokenizer vocabulary, not indexed data; it is loaded once and does not grow with the KB.
+Chunking and inference share this exact tokenizer.
 
 Use a model for a command with `--model`:
 
@@ -89,7 +91,7 @@ chimpiler kb add ./docs --model default
 chimpiler kb search "vector store" --model default
 ```
 
-> Embeddings from different providers are not comparable. If you switch models, run
+> Embeddings from different providers are not comparable. The KB rejects mixed providers. If you switch models, run
 > `chimpiler kb rebuild --model <id>`.
 
 ## Commands

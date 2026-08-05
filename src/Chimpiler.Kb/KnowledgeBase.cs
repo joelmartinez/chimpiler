@@ -12,21 +12,30 @@ namespace Chimpiler.Kb;
 /// </summary>
 public sealed class KnowledgeBase : IKnowledgeBase
 {
+    private const int SemanticNeighbourCount = 1;
+    private const int SemanticCandidatePoolSize = 8;
+    private const double SemanticLinkMinimumSimilarity = 0.55;
+    private const double LexicalOverlapWeight = 0.1;
+    private static readonly char[] SemanticTokenSeparators = [' ', '\t', '\n', '\r', '.', ',', ';', ':', '(', ')', '[', ']', '{', '}', '"', '\'', '/', '\\', '#', '-', '`'];
+
     private readonly IVectorStore _vectorStore;
     private readonly IGraphStore _graphStore;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly ChunkerRegistry _chunkers;
+    private readonly bool _allowEmbeddingMismatch;
 
     public KnowledgeBase(
         IVectorStore vectorStore,
         IGraphStore graphStore,
         IEmbeddingProvider embeddingProvider,
-        ChunkerRegistry chunkers)
+        ChunkerRegistry chunkers,
+        bool allowEmbeddingMismatch = false)
     {
         _vectorStore = vectorStore;
         _graphStore = graphStore;
         _embeddingProvider = embeddingProvider;
         _chunkers = chunkers;
+        _allowEmbeddingMismatch = allowEmbeddingMismatch;
     }
 
     /// <summary>Weight applied to graph-expanded neighbours so they rank below direct vector hits.</summary>
@@ -35,6 +44,23 @@ public sealed class KnowledgeBase : IKnowledgeBase
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await _vectorStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        var storedProvider = await _vectorStore.GetSettingAsync("embedding.provider", cancellationToken).ConfigureAwait(false);
+        var storedDimension = await _vectorStore.GetSettingAsync("embedding.dimension", cancellationToken).ConfigureAwait(false);
+        var embeddingsMismatch =
+            (storedProvider is not null && !string.Equals(storedProvider, _embeddingProvider.Name, StringComparison.Ordinal)) ||
+            (storedDimension is not null && !string.Equals(storedDimension, _embeddingProvider.Dimension.ToString(), StringComparison.Ordinal));
+        if (embeddingsMismatch && !_allowEmbeddingMismatch)
+        {
+            throw new InvalidOperationException(
+                $"Knowledge base embeddings use '{storedProvider}' ({storedDimension} dimensions), but the active provider is '{_embeddingProvider.Name}' ({_embeddingProvider.Dimension} dimensions). Run 'chimpiler kb rebuild --model <model>' to switch models.");
+        }
+
+        if (embeddingsMismatch)
+        {
+            // Keep the old settings until the replacement embeddings have all been written.
+            return;
+        }
+
         await _vectorStore.SetSettingAsync("embedding.provider", _embeddingProvider.Name, cancellationToken).ConfigureAwait(false);
         await _vectorStore.SetSettingAsync("embedding.dimension", _embeddingProvider.Dimension.ToString(), cancellationToken).ConfigureAwait(false);
     }
@@ -62,8 +88,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
     {
-        var embeddings = await _embeddingProvider.EmbedAsync(new[] { query }, cancellationToken).ConfigureAwait(false);
-        return await _vectorStore.SearchAsync(embeddings[0], topK, cancellationToken).ConfigureAwait(false);
+        var embeddings = await _embeddingProvider.EmbedQueriesAsync(new[] { query }, cancellationToken).ConfigureAwait(false);
+        return await _vectorStore.SearchAsync(embeddings[0], _embeddingProvider.Name, topK, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SearchResult>> GraphSearchAsync(string query, int topK = 5, int depth = 1, CancellationToken cancellationToken = default)
@@ -111,6 +137,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
             total += await IndexAsync(document.SourcePath, text, options ?? ChunkingOptions.Default, cancellationToken).ConfigureAwait(false);
         }
 
+        await _vectorStore.SetSettingAsync("embedding.provider", _embeddingProvider.Name, cancellationToken).ConfigureAwait(false);
+        await _vectorStore.SetSettingAsync("embedding.dimension", _embeddingProvider.Dimension.ToString(), cancellationToken).ConfigureAwait(false);
         return total;
     }
 
@@ -136,7 +164,7 @@ public sealed class KnowledgeBase : IKnowledgeBase
         }
 
         var embeddings = await _embeddingProvider
-            .EmbedAsync(chunks.Select(c => c.Text).ToList(), cancellationToken)
+            .EmbedDocumentsAsync(chunks.Select(c => c.Text).ToList(), cancellationToken)
             .ConfigureAwait(false);
 
         var documentNodeId = await _graphStore
@@ -186,7 +214,76 @@ public sealed class KnowledgeBase : IKnowledgeBase
             previousNodeId = chunkNodeId;
         }
 
+        await LinkSemanticNeighboursAsync(documentId, cancellationToken).ConfigureAwait(false);
         return chunks.Count;
+    }
+
+    private async Task LinkSemanticNeighboursAsync(long documentId, CancellationToken cancellationToken)
+    {
+        var documentChunks = (await _vectorStore
+                .GetChunksForDocumentAsync(documentId, cancellationToken)
+                .ConfigureAwait(false))
+            .ToDictionary(chunk => chunk.Id);
+
+        foreach (var chunk in documentChunks.Values)
+        {
+            var neighbours = await _vectorStore
+                .SearchAsync(chunk.Embedding, _embeddingProvider.Name, documentChunks.Count + SemanticCandidatePoolSize, cancellationToken)
+                .ConfigureAwait(false);
+            var relatedChunks = neighbours
+                .Where(result => result.DocumentId != documentId && result.Score >= SemanticLinkMinimumSimilarity)
+                .OrderByDescending(result => result.Score + (LexicalOverlapWeight * TokenOverlap(chunk.Text, result.Text)))
+                .Take(SemanticNeighbourCount)
+                .ToList();
+            if (relatedChunks.Count == 0)
+            {
+                continue;
+            }
+
+            var nodes = await _graphStore
+                .GetNodesForChunksAsync(new[] { chunk.Id }.Concat(relatedChunks.Select(result => result.ChunkId)).ToList(), cancellationToken)
+                .ConfigureAwait(false);
+            var nodesByChunkId = nodes
+                .Where(node => node.ChunkId is not null)
+                .ToDictionary(node => node.ChunkId!.Value);
+
+            if (!nodesByChunkId.TryGetValue(chunk.Id, out var sourceNode))
+            {
+                throw new InvalidOperationException($"No graph node exists for chunk {chunk.Id}.");
+            }
+
+            foreach (var related in relatedChunks)
+            {
+                if (!nodesByChunkId.TryGetValue(related.ChunkId, out var targetNode))
+                {
+                    throw new InvalidOperationException($"No graph node exists for chunk {related.ChunkId}.");
+                }
+
+                await _graphStore
+                    .AddEdgeAsync(sourceNode.Id, targetNode.Id, EdgeKinds.Semantic, related.Score, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static double TokenOverlap(string left, string right)
+    {
+        var leftTokens = left
+            .Split(SemanticTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length >= 4)
+            .Select(token => token.ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var rightTokens = right
+            .Split(SemanticTokenSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => token.Length >= 4)
+            .Select(token => token.ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        if (leftTokens.Count == 0 || rightTokens.Count == 0)
+        {
+            return 0;
+        }
+
+        return (double)leftTokens.Intersect(rightTokens).Count() / Math.Min(leftTokens.Count, rightTokens.Count);
     }
 
     private static string ComputeHash(string text) =>

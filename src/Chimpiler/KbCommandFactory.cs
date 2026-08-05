@@ -221,7 +221,7 @@ internal static class KbCommandFactory
                 await kb.InitializeAsync();
                 var chunks = await kb.RebuildAsync();
                 Console.WriteLine($"Rebuilt {chunks} chunk(s).");
-            });
+            }, allowEmbeddingMismatch: true);
         }, dbOption, modelOption);
 
         return command;
@@ -300,14 +300,19 @@ internal static class KbCommandFactory
         return models;
     }
 
-    private static async Task RunAsync(string databasePath, string? modelId, Func<IKnowledgeBase, Task> action)
+    private static async Task RunAsync(
+        string databasePath,
+        string? modelId,
+        Func<IKnowledgeBase, Task> action,
+        bool allowEmbeddingMismatch = false)
     {
         try
         {
             var options = new KnowledgeBaseOptions
             {
                 DatabasePath = databasePath,
-                ModelId = modelId
+                ModelId = modelId,
+                AllowEmbeddingMismatch = allowEmbeddingMismatch
             };
 
             await using var provider = KnowledgeBaseFactory.Build(options);

@@ -21,8 +21,10 @@ public interface IVectorStore
 
     Task<long> AddChunkAsync(long documentId, int ordinal, string text, string? heading, int tokenCount, float[] embedding, string providerName, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<EmbeddedKbChunk>> GetChunksForDocumentAsync(long documentId, CancellationToken cancellationToken = default);
+
     /// <summary>Returns the <paramref name="topK"/> chunks most similar to <paramref name="queryEmbedding"/>.</summary>
-    Task<IReadOnlyList<SearchResult>> SearchAsync(float[] queryEmbedding, int topK, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SearchResult>> SearchAsync(float[] queryEmbedding, string providerName, int topK, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SearchResult>> GetChunksAsync(IReadOnlyCollection<long> chunkIds, CancellationToken cancellationToken = default);
 

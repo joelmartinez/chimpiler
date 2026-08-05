@@ -21,6 +21,9 @@ public sealed record KnowledgeBaseOptions
     /// <summary>When true, downloads the model on first use if it is missing.</summary>
     public bool AutoInstallModel { get; init; } = true;
 
+    /// <summary>Allows rebuild to replace a knowledge base's embedding provider.</summary>
+    public bool AllowEmbeddingMismatch { get; init; }
+
     public ChunkingOptions Chunking { get; init; } = ChunkingOptions.Default;
 }
 
@@ -35,16 +38,17 @@ public static class KnowledgeBaseFactory
         services.AddSingleton<IVectorStore>(sp => new SqliteVectorStore(sp.GetRequiredService<KbDatabase>()));
         services.AddSingleton<IGraphStore>(sp => new SqliteGraphStore(sp.GetRequiredService<KbDatabase>()));
         services.AddSingleton<IEmbeddingModelCatalog>(_ => new HuggingFaceModelCatalog());
-        services.AddSingleton<IKbTokenizer>(_ => new WhitespaceTokenizer());
         services.AddSingleton<IEmbeddingProvider>(sp => CreateProvider(
             (HuggingFaceModelCatalog)sp.GetRequiredService<IEmbeddingModelCatalog>(),
             options));
+        services.AddSingleton<IKbTokenizer>(sp => sp.GetRequiredService<IEmbeddingProvider>().Tokenizer);
         services.AddSingleton(sp => CreateRegistry(sp.GetRequiredService<IKbTokenizer>()));
         services.AddSingleton<IKnowledgeBase>(sp => new KnowledgeBase(
             sp.GetRequiredService<IVectorStore>(),
             sp.GetRequiredService<IGraphStore>(),
             sp.GetRequiredService<IEmbeddingProvider>(),
-            sp.GetRequiredService<ChunkerRegistry>()));
+            sp.GetRequiredService<ChunkerRegistry>(),
+            options.AllowEmbeddingMismatch));
 
         return services;
     }
@@ -83,9 +87,8 @@ public static class KnowledgeBaseFactory
         }
 
         return new OnnxEmbeddingProvider(
-            descriptor.Id,
+            descriptor,
             catalog.GetModelPath(descriptor.Id),
-            catalog.GetVocabPath(descriptor.Id),
-            descriptor.Dimension);
+            catalog.GetVocabPath(descriptor.Id));
     }
 }

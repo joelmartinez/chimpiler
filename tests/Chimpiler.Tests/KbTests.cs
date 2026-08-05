@@ -335,7 +335,7 @@ public class KbTests : IDisposable
 
         Assert.Equal(HuggingFaceModelCatalog.BgeSmallEn, catalog.Resolve("default").Id);
         Assert.False(catalog.IsInstalled("default"));
-        Assert.Contains(catalog.Available, m => m.Id == HuggingFaceModelCatalog.NomicEmbedText);
+        Assert.Single(catalog.Available);
         Assert.Throws<ArgumentException>(() => catalog.Resolve("not-a-model"));
     }
 
@@ -344,5 +344,37 @@ public class KbTests : IDisposable
     {
         var catalog = new HuggingFaceModelCatalog(Path.Combine(_directory, "models"));
         catalog.Remove("default");
+    }
+
+    [Fact]
+    public async Task Initialize_RejectsMixedEmbeddingProviders()
+    {
+        using var database = CreateDatabase();
+        var hashKnowledgeBase = CreateKnowledgeBase(database, new HashEmbeddingProvider(128));
+        await hashKnowledgeBase.InitializeAsync();
+
+        var secondKnowledgeBase = CreateKnowledgeBase(database, new HashEmbeddingProvider(256));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => secondKnowledgeBase.InitializeAsync());
+        Assert.Contains("embeddings use 'hash' (128 dimensions)", error.Message);
+    }
+
+    [Fact]
+    public async Task Initialize_ForModelRebuild_KeepsExistingProviderSettingsUntilRebuildCompletes()
+    {
+        using var database = CreateDatabase();
+        var originalKnowledgeBase = CreateKnowledgeBase(database, new HashEmbeddingProvider(128));
+        await originalKnowledgeBase.InitializeAsync();
+
+        var replacementKnowledgeBase = new KnowledgeBase(
+            new SqliteVectorStore(database),
+            new SqliteGraphStore(database),
+            new HashEmbeddingProvider(256),
+            KnowledgeBaseFactory.CreateRegistry(new WhitespaceTokenizer()),
+            allowEmbeddingMismatch: true);
+        await replacementKnowledgeBase.InitializeAsync();
+
+        var store = new SqliteVectorStore(database);
+        Assert.Equal("128", await store.GetSettingAsync("embedding.dimension"));
     }
 }

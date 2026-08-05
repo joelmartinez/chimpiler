@@ -1,12 +1,25 @@
 namespace Chimpiler.Kb.Abstractions;
 
+/// <summary>How the encoder output is reduced to a sentence embedding.</summary>
+public enum EmbeddingPooling
+{
+    Cls,
+    Mean
+}
+
 /// <summary>Describes a downloadable local embedding model.</summary>
 public sealed record EmbeddingModelDescriptor(
     string Id,
     string Description,
     int Dimension,
+    int MaximumSequenceLength,
+    EmbeddingPooling Pooling,
+    string? DocumentPrefix,
+    string? QueryPrefix,
     string ModelUrl,
-    string TokenizerUrl);
+    string ModelSha256,
+    string TokenizerUrl,
+    string TokenizerSha256);
 
 /// <summary>Manages locally installed ONNX embedding models.</summary>
 public interface IEmbeddingModelCatalog

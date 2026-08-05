@@ -18,6 +18,9 @@ public sealed record KbChunk(
     string? Heading,
     int TokenCount);
 
+/// <summary>A stored chunk together with its embedding, used to construct semantic graph edges.</summary>
+public sealed record EmbeddedKbChunk(long Id, long DocumentId, string Text, float[] Embedding);
+
 /// <summary>Kinds of graph nodes stored in the knowledge base.</summary>
 public static class NodeKinds
 {
@@ -36,6 +39,7 @@ public static class EdgeKinds
     public const string Child = "child";
     public const string References = "references";
     public const string Section = "section";
+    public const string Semantic = "semantic";
     public const string Symbol = "symbol";
     public const string Type = "type";
 }

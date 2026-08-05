@@ -25,7 +25,18 @@ public sealed class HashEmbeddingProvider : IEmbeddingProvider
 
     public int Dimension { get; }
 
+    public IKbTokenizer Tokenizer { get; } = new WhitespaceTokenizer();
+
     public Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+        => EmbedDocumentsAsync(texts, cancellationToken);
+
+    public Task<IReadOnlyList<float[]>> EmbedDocumentsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+        EmbedAsyncCore(texts, cancellationToken);
+
+    public Task<IReadOnlyList<float[]>> EmbedQueriesAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+        EmbedAsyncCore(texts, cancellationToken);
+
+    private Task<IReadOnlyList<float[]>> EmbedAsyncCore(IReadOnlyList<string> texts, CancellationToken cancellationToken)
     {
         var vectors = new List<float[]>(texts.Count);
         foreach (var text in texts)

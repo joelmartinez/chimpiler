@@ -111,7 +111,32 @@ public sealed class SqliteVectorStore : IVectorStore
         return chunkId;
     }
 
-    public async Task<IReadOnlyList<SearchResult>> SearchAsync(float[] queryEmbedding, int topK, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<EmbeddedKbChunk>> GetChunksForDocumentAsync(long documentId, CancellationToken cancellationToken = default)
+    {
+        using var command = _database.CreateCommand("""
+            SELECT c.Id, c.DocumentId, c.Text, e.Vector, e.Dimension
+            FROM Chunks c
+            JOIN Embeddings e ON e.ChunkId = c.Id
+            WHERE c.DocumentId = $document;
+            """);
+        command.Parameters.AddWithValue("$document", documentId);
+
+        var chunks = new List<EmbeddedKbChunk>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var dimension = reader.GetInt32(4);
+            chunks.Add(new EmbeddedKbChunk(
+                reader.GetInt64(0),
+                reader.GetInt64(1),
+                reader.GetString(2),
+                VectorCodec.Decode((byte[])reader["Vector"], dimension)));
+        }
+
+        return chunks;
+    }
+
+    public async Task<IReadOnlyList<SearchResult>> SearchAsync(float[] queryEmbedding, string providerName, int topK, CancellationToken cancellationToken = default)
     {
         if (topK <= 0)
         {
@@ -126,9 +151,10 @@ public sealed class SqliteVectorStore : IVectorStore
             FROM Embeddings e
             JOIN Chunks c ON c.Id = e.ChunkId
             JOIN Documents d ON d.Id = c.DocumentId
-            WHERE e.Dimension = $dim;
+            WHERE e.Dimension = $dim AND e.Provider = $provider;
             """);
         command.Parameters.AddWithValue("$dim", queryEmbedding.Length);
+        command.Parameters.AddWithValue("$provider", providerName);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
