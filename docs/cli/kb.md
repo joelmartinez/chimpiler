@@ -50,6 +50,9 @@ New providers (Azure OpenAI, OpenAI, Ollama, LM Studio, …) only need to implem
 
 The database defaults to `.chimpiler/kb.db` and uses a versioned schema applied through
 migrations recorded in `MigrationHistory`.
+This project-local state is ignored by Git and should not be committed: it is a binary database
+that can contain indexed source content and cannot be merged meaningfully. Use `--db` to place a
+KB elsewhere when needed; commit the source corpus rather than its generated database.
 
 Tables: `Documents`, `Chunks`, `Embeddings`, `Nodes`, `Edges`, `NodeMetadata`, `Settings`,
 `MigrationHistory`.
