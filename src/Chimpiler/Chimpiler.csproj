@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Chimpiler.Core\Chimpiler.Core.csproj" />
+    <ProjectReference Include="..\Chimpiler.Kb\Chimpiler.Kb.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,6 +12,7 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\docs\cli\ef-migrate.md" Link="Resources\ef-migrate.md" />
     <EmbeddedResource Include="..\..\docs\cli\clawcker.md" Link="Resources\clawcker.md" />
+    <EmbeddedResource Include="..\..\docs\cli\kb.md" Link="Resources\kb.md" />
   </ItemGroup>
 
   <ItemGroup>
@@ -25,15 +27,15 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>chimpiler</ToolCommandName>
     <PackageId>Chimpiler</PackageId>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <Authors>Joel Martinez</Authors>
-    <Description>A multi-purpose CLI tooling ecosystem for .NET</Description>
+    <Description>Agent-ready local GraphRAG and .NET CLI tooling</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/joelmartinez/chimpiler</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/joelmartinez/chimpiler</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>dotnet;cli;efcore;dacpac;openclaw;clawcker</PackageTags>
+    <PackageTags>dotnet;cli;agent;ai;efcore;dacpac;openclaw;clawcker;rag;graphrag;knowledge-base</PackageTags>
   </PropertyGroup>
 
 </Project>
