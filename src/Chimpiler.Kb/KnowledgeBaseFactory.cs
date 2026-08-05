@@ -78,7 +78,8 @@ public static class KnowledgeBaseFactory
                     $"Embedding model '{descriptor.Id}' is not installed. Run 'chimpiler kb models install {descriptor.Id}'.");
             }
 
-            catalog.EnsureInstalledAsync(descriptor.Id).GetAwaiter().GetResult();
+            // Run on the thread pool so the blocking wait cannot deadlock on a captured synchronization context.
+            Task.Run(() => catalog.EnsureInstalledAsync(descriptor.Id)).GetAwaiter().GetResult();
         }
 
         return new OnnxEmbeddingProvider(

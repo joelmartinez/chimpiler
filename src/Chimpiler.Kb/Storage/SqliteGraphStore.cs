@@ -108,32 +108,19 @@ public sealed class SqliteGraphStore : IGraphStore
             return Array.Empty<long>();
         }
 
-        var adjacency = await LoadAdjacencyAsync(cancellationToken).ConfigureAwait(false);
         var visited = new HashSet<long>(nodeIds);
-        var frontier = new List<long>(nodeIds);
+        var frontier = (IReadOnlyCollection<long>)nodeIds.Distinct().ToList();
 
-        for (var level = 0; level < depth; level++)
+        for (var level = 0; level < depth && frontier.Count > 0; level++)
         {
+            var neighbours = await LoadNeighboursAsync(frontier, cancellationToken).ConfigureAwait(false);
             var next = new List<long>();
-            foreach (var nodeId in frontier)
+            foreach (var neighbour in neighbours)
             {
-                if (!adjacency.TryGetValue(nodeId, out var neighbours))
+                if (visited.Add(neighbour))
                 {
-                    continue;
+                    next.Add(neighbour);
                 }
-
-                foreach (var neighbour in neighbours)
-                {
-                    if (visited.Add(neighbour))
-                    {
-                        next.Add(neighbour);
-                    }
-                }
-            }
-
-            if (next.Count == 0)
-            {
-                break;
             }
 
             frontier = next;
@@ -145,35 +132,38 @@ public sealed class SqliteGraphStore : IGraphStore
 
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
-        using var command = _database.CreateCommand("DELETE FROM Edges; DELETE FROM NodeMetadata; DELETE FROM Nodes;");
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var sql in new[] { "DELETE FROM Edges;", "DELETE FROM NodeMetadata;", "DELETE FROM Nodes;" })
+        {
+            using var command = _database.CreateCommand(sql);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private async Task<Dictionary<long, List<long>>> LoadAdjacencyAsync(CancellationToken cancellationToken)
+    /// <summary>Loads the direct neighbours of the given nodes in both edge directions.</summary>
+    private async Task<IReadOnlyList<long>> LoadNeighboursAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken)
     {
-        var adjacency = new Dictionary<long, List<long>>();
-        using var command = _database.CreateCommand("SELECT SourceNodeId, TargetNodeId FROM Edges;");
+        var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
+        var placeholders = string.Join(", ", parameterNames);
+        using var command = _database.CreateCommand($"""
+            SELECT TargetNodeId FROM Edges WHERE SourceNodeId IN ({placeholders})
+            UNION
+            SELECT SourceNodeId FROM Edges WHERE TargetNodeId IN ({placeholders});
+            """);
+
+        var i = 0;
+        foreach (var id in nodeIds)
+        {
+            command.Parameters.AddWithValue(parameterNames[i++], id);
+        }
+
+        var neighbours = new List<long>();
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            var source = reader.GetInt64(0);
-            var target = reader.GetInt64(1);
-            Add(adjacency, source, target);
-            Add(adjacency, target, source);
+            neighbours.Add(reader.GetInt64(0));
         }
 
-        return adjacency;
-
-        static void Add(Dictionary<long, List<long>> map, long from, long to)
-        {
-            if (!map.TryGetValue(from, out var list))
-            {
-                list = new List<long>();
-                map[from] = list;
-            }
-
-            list.Add(to);
-        }
+        return neighbours;
     }
 
     private async Task<IReadOnlyList<long>> ResolveChunkIdsAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken)

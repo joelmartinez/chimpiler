@@ -125,18 +125,15 @@ public sealed class SqliteVectorStore : IVectorStore
             SELECT c.Id, c.DocumentId, d.SourcePath, c.Text, c.Heading, e.Vector, e.Norm, e.Dimension
             FROM Embeddings e
             JOIN Chunks c ON c.Id = e.ChunkId
-            JOIN Documents d ON d.Id = c.DocumentId;
+            JOIN Documents d ON d.Id = c.DocumentId
+            WHERE e.Dimension = $dim;
             """);
+        command.Parameters.AddWithValue("$dim", queryEmbedding.Length);
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             var dimension = reader.GetInt32(7);
-            if (dimension != queryEmbedding.Length)
-            {
-                continue;
-            }
-
             var vector = VectorCodec.Decode((byte[])reader["Vector"], dimension);
             var score = VectorCodec.CosineSimilarity(queryEmbedding, queryNorm, vector, reader.GetDouble(6));
 
