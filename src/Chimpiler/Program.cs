@@ -33,6 +33,10 @@ class Program
         var clawckerCommand = CreateClawckerCommand();
         rootCommand.AddCommand(clawckerCommand);
 
+        // Create the kb command
+        var kbCommand = KbCommandFactory.Create();
+        rootCommand.AddCommand(kbCommand);
+
         // Create the help command
         var helpCommand = CreateHelpCommand(rootCommand);
         rootCommand.AddCommand(helpCommand);
@@ -78,6 +82,7 @@ class Program
         Console.WriteLine("Available Commands:");
         Console.WriteLine("  ef-migrate    Generate DACPACs from EF Core DbContext models");
         Console.WriteLine("  clawcker      Manage local OpenClaw instances using Docker");
+        Console.WriteLine("  kb            Local GraphRAG knowledge base backed by SQLite");
         Console.WriteLine("  help          Display help information for Chimpiler or a specific subcommand");
         Console.WriteLine();
         Console.WriteLine("Options:");
@@ -97,6 +102,11 @@ class Program
         else if (subcommand.Equals("clawcker", StringComparison.OrdinalIgnoreCase))
         {
             var helpText = LoadEmbeddedMarkdown("clawcker.md");
+            Console.WriteLine(helpText);
+        }
+        else if (subcommand.Equals("kb", StringComparison.OrdinalIgnoreCase))
+        {
+            var helpText = LoadEmbeddedMarkdown("kb.md");
             Console.WriteLine(helpText);
         }
         else

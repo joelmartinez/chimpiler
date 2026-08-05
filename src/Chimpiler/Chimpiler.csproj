@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Chimpiler.Core\Chimpiler.Core.csproj" />
+    <ProjectReference Include="..\Chimpiler.Kb\Chimpiler.Kb.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -11,6 +12,7 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\docs\cli\ef-migrate.md" Link="Resources\ef-migrate.md" />
     <EmbeddedResource Include="..\..\docs\cli\clawcker.md" Link="Resources\clawcker.md" />
+    <EmbeddedResource Include="..\..\docs\cli\kb.md" Link="Resources\kb.md" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,7 +35,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/joelmartinez/chimpiler</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>dotnet;cli;efcore;dacpac;openclaw;clawcker</PackageTags>
+    <PackageTags>dotnet;cli;efcore;dacpac;openclaw;clawcker;rag;graphrag;knowledge-base</PackageTags>
   </PropertyGroup>
 
 </Project>

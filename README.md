@@ -46,6 +46,26 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 
 [Learn more about ef-migrate →](docs/cli/ef-migrate.md)
 
+### `chimpiler kb` — Local GraphRAG Knowledge Base
+
+The `kb` command builds and queries a completely local, zero-cloud, zero-Python knowledge base
+stored in a single SQLite file. Install once, run a command, and everything else just works.
+
+```bash
+chimpiler kb init
+chimpiler kb add ./docs
+chimpiler kb graph-search "how do I generate a dacpac?"
+```
+
+**Key Features:**
+- ✅ SQLite is the only database — no server, no Python, no cloud
+- ✅ Local ONNX embedding models, downloaded on first use
+- ✅ Vectors and a lightweight knowledge graph in the same file
+- ✅ Semantic search plus graph-enhanced retrieval
+- ✅ Pluggable `IEmbeddingProvider` for future cloud providers
+
+[Learn more about kb →](docs/cli/kb.md)
+
 ## Installation
 
 ### As a .NET Global Tool

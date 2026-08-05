@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Chimpiler.Core\Chimpiler.Core.csproj" />
+    <ProjectReference Include="..\..\src\Chimpiler.Kb\Chimpiler.Kb.csproj" />
     <ProjectReference Include="..\Chimpiler.TestFixtures\Chimpiler.TestFixtures.csproj" />
   </ItemGroup>
 
