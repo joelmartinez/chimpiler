@@ -15,6 +15,10 @@ public interface IGraphStore
 
     Task<IReadOnlyList<KbNode>> GetNodesForChunksAsync(IReadOnlyCollection<long> chunkIds, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<KbNode>> GetNodesByKindAsync(string kind, CancellationToken cancellationToken = default);
+
+    Task<KbNode?> GetNodeAsync(string kind, string key, CancellationToken cancellationToken = default);
+
     /// <summary>Expands outward from the given nodes up to <paramref name="depth"/> hops, returning reachable chunk ids.</summary>
     Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, CancellationToken cancellationToken = default);
 

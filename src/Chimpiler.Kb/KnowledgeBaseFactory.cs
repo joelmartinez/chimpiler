@@ -1,6 +1,7 @@
 using Chimpiler.Kb.Abstractions;
 using Chimpiler.Kb.Chunking;
 using Chimpiler.Kb.Embeddings;
+using Chimpiler.Kb.EntityExtraction;
 using Chimpiler.Kb.Models;
 using Chimpiler.Kb.Storage;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +38,8 @@ public static class KnowledgeBaseFactory
         services.AddSingleton(_ => new KbDatabase(options.DatabasePath));
         services.AddSingleton<IVectorStore>(sp => new SqliteVectorStore(sp.GetRequiredService<KbDatabase>()));
         services.AddSingleton<IGraphStore>(sp => new SqliteGraphStore(sp.GetRequiredService<KbDatabase>()));
+        services.AddSingleton<IEntityExtractor, RuleBasedEntityExtractor>();
+        services.AddSingleton<IEntityRelationshipExtractor, RuleBasedEntityRelationshipExtractor>();
         services.AddSingleton<IEmbeddingModelCatalog>(_ => new HuggingFaceModelCatalog());
         services.AddSingleton<IEmbeddingProvider>(sp => CreateProvider(
             (HuggingFaceModelCatalog)sp.GetRequiredService<IEmbeddingModelCatalog>(),
@@ -48,7 +51,9 @@ public static class KnowledgeBaseFactory
             sp.GetRequiredService<IGraphStore>(),
             sp.GetRequiredService<IEmbeddingProvider>(),
             sp.GetRequiredService<ChunkerRegistry>(),
-            options.AllowEmbeddingMismatch));
+            options.AllowEmbeddingMismatch,
+            sp.GetRequiredService<IEntityExtractor>(),
+            sp.GetRequiredService<IEntityRelationshipExtractor>()));
 
         return services;
     }

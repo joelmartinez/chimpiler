@@ -101,6 +101,45 @@ public sealed class SqliteGraphStore : IGraphStore
         return nodes;
     }
 
+    public async Task<IReadOnlyList<KbNode>> GetNodesByKindAsync(string kind, CancellationToken cancellationToken = default)
+    {
+        using var command = _database.CreateCommand(
+            "SELECT Id, Kind, Key, ChunkId, DocumentId FROM Nodes WHERE Kind = $kind;");
+        command.Parameters.AddWithValue("$kind", kind);
+
+        var nodes = new List<KbNode>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            nodes.Add(new KbNode(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                reader.IsDBNull(4) ? null : reader.GetInt64(4)));
+        }
+
+        return nodes;
+    }
+
+    public async Task<KbNode?> GetNodeAsync(string kind, string key, CancellationToken cancellationToken = default)
+    {
+        using var command = _database.CreateCommand(
+            "SELECT Id, Kind, Key, ChunkId, DocumentId FROM Nodes WHERE Kind = $kind AND Key = $key;");
+        command.Parameters.AddWithValue("$kind", kind);
+        command.Parameters.AddWithValue("$key", key);
+
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new KbNode(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                reader.IsDBNull(4) ? null : reader.GetInt64(4))
+            : null;
+    }
+
     public async Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, CancellationToken cancellationToken = default)
     {
         if (nodeIds.Count == 0 || depth <= 0)

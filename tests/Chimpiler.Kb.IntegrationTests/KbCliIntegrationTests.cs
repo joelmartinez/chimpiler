@@ -33,6 +33,16 @@ public sealed class KbCliIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Prompt_ProvidesAgentReadyKbOperatingGuidance()
+    {
+        var prompt = await RunCliAsync("kb", "prompt");
+
+        Assert.Contains("graph-search", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("candidate aliases", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("read and verify", prompt.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GraphSearch_TraversesTertiarySemanticConnectionsAcrossDocuments()
     {
         var database = Path.Combine(_directory, "semantic-chain.db");
@@ -59,6 +69,74 @@ public sealed class KbCliIntegrationTests : IDisposable
         Assert.DoesNotContain("configuration.md", oneHopGraphSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("configuration.md", twoHopGraphSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("sunTargetBias", twoHopGraphSearch.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GraphSearch_TraversesCandidatePersonAndOrganizationAliasesAcrossDocuments()
+    {
+        var database = Path.Combine(_directory, "entity-aliases.db");
+        var corpus = Path.Combine(AppContext.BaseDirectory, "Fixtures", "entity-aliases");
+
+        await RunCliAsync("kb", "models", "install", "default");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "init");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "bob.md"));
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "robert.md"));
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "electronic-arts.md"));
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "ea.md"));
+
+        var bobVectorSearch = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "search",
+            "What did Bob Tagart authorize?", "--top", "1");
+        var bobGraphSearch = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "graph-search",
+            "What did Bob Tagart authorize?", "--top", "1", "--depth", "3");
+        var eaVectorSearch = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "search",
+            "What did EA authorize?", "--top", "1");
+        var eaGraphSearch = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "graph-search",
+            "What did EA authorize?", "--top", "1", "--depth", "3");
+
+        Assert.Contains("bob.md", bobVectorSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("robert.md", bobVectorSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("robert.md", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("crimsonLedger", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("ea.md", eaVectorSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("electronic-arts.md", eaVectorSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("electronic-arts.md", eaGraphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("NorthstarLedger", eaGraphSearch.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GraphSearch_UsesExplicitEntityRelationshipsAndQueryAliases()
+    {
+        var database = Path.Combine(_directory, "relationships.db");
+        var corpus = Path.Combine(AppContext.BaseDirectory, "Fixtures", "relationships");
+
+        await RunCliAsync("kb", "models", "install", "default");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "init");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "authorization.md"));
+        await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "record.md"));
+        var entities = await RunCliAsync("kb", "--db", database, "--model", "default", "entities");
+        var assertion = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "relate",
+            "person:bob tagart", "authorized", "organization:electronic arts",
+            "--evidence", "Verified by the release authorization.", "--confidence", "0.9");
+
+        var direct = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "search",
+            "What did Robert Tagart authorize?", "--top", "1");
+        var graph = await RunCliAsync(
+            "kb", "--db", database, "--model", "default", "graph-search",
+            "What did Robert Tagart authorize?", "--top", "1", "--depth", "3");
+
+        Assert.Contains("person:bob tagart", entities.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("organization:electronic arts", entities.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Added 'authorized' relationship", assertion.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("authorization.md", direct.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("record.md", direct.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("record.md", graph.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("NorthstarReceipt", graph.StandardOutput, StringComparison.Ordinal);
     }
 
     public void Dispose()

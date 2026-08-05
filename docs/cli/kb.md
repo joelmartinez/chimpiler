@@ -38,7 +38,12 @@ cosine similarity is a single dot product at query time.
 ## Knowledge graph
 
 Indexing creates one `document` node per file and one `chunk` node per chunk, plus `section`
-nodes for markdown headings and code declarations. Each chunk also links to its strongest
+nodes for markdown headings and code declarations. It also extracts conservative local person,
+organization, and organization-initialism mentions. Each chunk links to its entity mentions; known
+nickname variants (such as Bob/Robert with the same surname) and unambiguous organization
+initialisms (such as Electronic Arts/EA) receive `alias-candidate` edges. These are intentionally
+candidate relationships, not assertions of identity: an acronym with more than one possible
+organization expansion is left unlinked. Each chunk also links to its strongest
 cross-document semantic neighbour when its cosine similarity is at least 0.55; small lexical
 overlap weighting avoids generic semantic hubs bypassing a more specific concept. Edges express
 `contains`, `child`, `section`, `semantic`, `parent`, `references`, `symbol` and `type`
@@ -52,8 +57,25 @@ Document
       ├── child
       ├── section
       ├── symbol
-      └── type
+      ├── type
+      └── mentions → Entity ── alias-candidate ── Entity
 ```
+
+Explicit local action statements with two recognized entities (for example, `Bob Tagart authorized
+Electronic Arts`) also create an `event` node with `subject` and `object` edges. `graph-search`
+extracts entities from the incoming question too, adds matching or unambiguous alias entity nodes
+as traversal seeds, then combines those graph results with vector-search hits.
+
+An agent harness can inspect entities and add a verified, evidence-bearing relationship:
+
+```bash
+chimpiler kb entities
+chimpiler kb relate "person:bob tagart" authorized "organization:electronic arts" \
+  --evidence "Bob Tagart authorized Electronic Arts."
+```
+
+Use the exact keys printed by `kb entities`. Agent-added relationships are marked separately from
+local extraction and must only be added after verifying their cited source.
 
 ## Search pipeline
 
@@ -126,6 +148,24 @@ Removes a document and all of its chunks, embeddings and graph nodes.
 
 Lists indexed documents.
 
+### `chimpiler kb entities`
+
+Lists extracted entity keys for graph retrieval and agent enrichment.
+
+```bash
+chimpiler kb entities
+```
+
+### `chimpiler kb relate <subject> <predicate> <object>`
+
+Adds a relationship that an agent has verified from evidence. The entity keys must be obtained from
+`kb entities`; provide the supporting text and an optional confidence score.
+
+```bash
+chimpiler kb relate "person:bob tagart" authorized "organization:electronic arts" \
+  --evidence "Bob Tagart authorized Electronic Arts." --confidence 0.9
+```
+
 ### `chimpiler kb search <query>`
 
 Pure vector search.
@@ -154,6 +194,16 @@ Runs `ANALYZE` and `VACUUM`.
 ### `chimpiler kb models <list|install|remove>`
 
 Manages the local ONNX model cache.
+
+### `chimpiler kb prompt`
+
+Prints compact, agent-ready operating guidance. Agent harnesses can inject the output into an
+agent's context before it calls the CLI. It explains indexing, direct and graph retrieval, local
+model selection, and the evidence requirements for graph-expanded alias relationships.
+
+```bash
+chimpiler kb prompt
+```
 
 ## Global options
 

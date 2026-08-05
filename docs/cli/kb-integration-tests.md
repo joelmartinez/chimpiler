@@ -17,3 +17,11 @@ time it runs and is intentionally not part of the default test command.
 It includes a three-document semantic chain (`Atlas sunward hold` → `heliostat bearing offset` →
 `sunTargetBias`) that verifies the answer is unavailable to both a single-result vector search and
 one-hop graph traversal, but appears with `kb graph-search --depth 2`.
+
+It also includes disconnected personal-name and organization fixtures. A direct vector query finds
+the Bob Tagart or EA document, while depth-three graph expansion reaches the Robert Tagart or
+Electronic Arts document only through a candidate alias edge.
+
+The relationship fixture verifies query-side alias extraction and typed event traversal: a query for
+Robert Tagart expands through Bob Tagart's `authorized` relationship to Electronic Arts and reaches
+the otherwise unrelated `NorthstarReceipt` record.

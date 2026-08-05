@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Chimpiler.Kb.Abstractions;
 using Chimpiler.Kb.Chunking;
+using Chimpiler.Kb.EntityExtraction;
 using Chimpiler.Kb.Models;
 
 namespace Chimpiler.Kb;
@@ -22,6 +23,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
     private readonly IGraphStore _graphStore;
     private readonly IEmbeddingProvider _embeddingProvider;
     private readonly ChunkerRegistry _chunkers;
+    private readonly IEntityExtractor _entityExtractor;
+    private readonly IEntityRelationshipExtractor _relationshipExtractor;
     private readonly bool _allowEmbeddingMismatch;
 
     public KnowledgeBase(
@@ -29,13 +32,17 @@ public sealed class KnowledgeBase : IKnowledgeBase
         IGraphStore graphStore,
         IEmbeddingProvider embeddingProvider,
         ChunkerRegistry chunkers,
-        bool allowEmbeddingMismatch = false)
+        bool allowEmbeddingMismatch = false,
+        IEntityExtractor? entityExtractor = null,
+        IEntityRelationshipExtractor? relationshipExtractor = null)
     {
         _vectorStore = vectorStore;
         _graphStore = graphStore;
         _embeddingProvider = embeddingProvider;
         _chunkers = chunkers;
         _allowEmbeddingMismatch = allowEmbeddingMismatch;
+        _entityExtractor = entityExtractor ?? new RuleBasedEntityExtractor();
+        _relationshipExtractor = relationshipExtractor ?? new RuleBasedEntityRelationshipExtractor();
     }
 
     /// <summary>Weight applied to graph-expanded neighbours so they rank below direct vector hits.</summary>
@@ -86,6 +93,22 @@ public sealed class KnowledgeBase : IKnowledgeBase
     public Task<IReadOnlyList<KbDocument>> ListDocumentsAsync(CancellationToken cancellationToken = default) =>
         _vectorStore.ListDocumentsAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<KbEntity>> ListEntitiesAsync(CancellationToken cancellationToken = default)
+    {
+        var nodes = await _graphStore.GetNodesByKindAsync(NodeKinds.Entity, cancellationToken).ConfigureAwait(false);
+        var entities = new List<KbEntity>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            var metadata = await _graphStore.GetNodeMetadataAsync(node.Id, cancellationToken).ConfigureAwait(false);
+            entities.Add(new KbEntity(
+                node.Key,
+                metadata.GetValueOrDefault("entity.kind", "unknown"),
+                metadata.GetValueOrDefault("entity.surface", node.Key)));
+        }
+
+        return entities.OrderBy(entity => entity.Key, StringComparer.Ordinal).ToList();
+    }
+
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
     {
         var embeddings = await _embeddingProvider.EmbedQueriesAsync(new[] { query }, cancellationToken).ConfigureAwait(false);
@@ -95,21 +118,27 @@ public sealed class KnowledgeBase : IKnowledgeBase
     public async Task<IReadOnlyList<SearchResult>> GraphSearchAsync(string query, int topK = 5, int depth = 1, CancellationToken cancellationToken = default)
     {
         var seeds = await SearchAsync(query, topK, cancellationToken).ConfigureAwait(false);
-        if (seeds.Count == 0)
+        var seedChunkIds = seeds.Select(s => s.ChunkId).ToList();
+        var seedNodes = await _graphStore.GetNodesForChunksAsync(seedChunkIds, cancellationToken).ConfigureAwait(false);
+        var queryEntityNodes = await ResolveQueryEntityNodesAsync(query, cancellationToken).ConfigureAwait(false);
+        var traversalSeedNodeIds = seedNodes
+            .Select(node => node.Id)
+            .Concat(queryEntityNodes.Select(node => node.Id))
+            .Distinct()
+            .ToList();
+        if (traversalSeedNodeIds.Count == 0)
         {
             return seeds;
         }
 
-        var seedChunkIds = seeds.Select(s => s.ChunkId).ToList();
-        var seedNodes = await _graphStore.GetNodesForChunksAsync(seedChunkIds, cancellationToken).ConfigureAwait(false);
         var expandedChunkIds = (await _graphStore
-                .ExpandAsync(seedNodes.Select(n => n.Id).ToList(), depth, cancellationToken)
+                .ExpandAsync(traversalSeedNodeIds, depth, cancellationToken)
                 .ConfigureAwait(false))
             .Except(seedChunkIds)
             .ToList();
 
         var neighbours = await _vectorStore.GetChunksAsync(expandedChunkIds, cancellationToken).ConfigureAwait(false);
-        var lowestSeedScore = seeds.Min(s => s.Score);
+        var lowestSeedScore = seeds.Count == 0 ? 1.0 : seeds.Min(s => s.Score);
 
         var combined = seeds
             .Concat(neighbours.Select(n => n with { Score = lowestSeedScore * GraphExpansionWeight }))
@@ -118,6 +147,21 @@ public sealed class KnowledgeBase : IKnowledgeBase
             .ToList();
 
         return combined;
+    }
+
+    public async Task AddEntityRelationshipAsync(KbEntityRelationship relationship, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relationship.SubjectKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relationship.Predicate);
+        ArgumentException.ThrowIfNullOrWhiteSpace(relationship.ObjectKey);
+        if (relationship.Confidence is < 0 or > 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(relationship), "Relationship confidence must be between 0 and 1.");
+        }
+
+        var subject = await RequireEntityAsync(relationship.SubjectKey, cancellationToken).ConfigureAwait(false);
+        var target = await RequireEntityAsync(relationship.ObjectKey, cancellationToken).ConfigureAwait(false);
+        await AddRelationshipEventAsync(subject.Id, target.Id, relationship, chunkNodeId: null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> RebuildAsync(ChunkingOptions? options = null, CancellationToken cancellationToken = default)
@@ -192,6 +236,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
                 .ConfigureAwait(false);
 
             await _graphStore.AddEdgeAsync(documentNodeId, chunkNodeId, EdgeKinds.Contains, 1.0, cancellationToken).ConfigureAwait(false);
+            await LinkEntitiesAsync(chunkNodeId, chunk.Text, cancellationToken).ConfigureAwait(false);
+            await LinkEntityRelationshipsAsync(chunkNodeId, chunk.Text, cancellationToken).ConfigureAwait(false);
 
             if (previousNodeId is { } previous)
             {
@@ -217,6 +263,115 @@ public sealed class KnowledgeBase : IKnowledgeBase
         await LinkSemanticNeighboursAsync(documentId, cancellationToken).ConfigureAwait(false);
         return chunks.Count;
     }
+
+    private async Task LinkEntitiesAsync(long chunkNodeId, string text, CancellationToken cancellationToken)
+    {
+        var knownEntities = (await _graphStore
+            .GetNodesByKindAsync(NodeKinds.Entity, cancellationToken)
+            .ConfigureAwait(false))
+            .ToList();
+
+        foreach (var mention in _entityExtractor.Extract(text))
+        {
+            var entityNodeId = await _graphStore
+                .UpsertNodeAsync(NodeKinds.Entity, mention.Key, chunkId: null, documentId: null, cancellationToken)
+                .ConfigureAwait(false);
+            await _graphStore.SetNodeMetadataAsync(entityNodeId, "entity.kind", mention.Kind, cancellationToken).ConfigureAwait(false);
+            await _graphStore.SetNodeMetadataAsync(entityNodeId, "entity.surface", mention.Surface, cancellationToken).ConfigureAwait(false);
+            await _graphStore.AddEdgeAsync(chunkNodeId, entityNodeId, EdgeKinds.Mentions, 1.0, cancellationToken).ConfigureAwait(false);
+
+            var candidates = knownEntities
+                .Select(node => (Node: node, Confidence: EntityAliasResolver.GetCandidateConfidence(mention, node)))
+                .Where(candidate => candidate.Confidence is not null)
+                .ToList();
+            if (candidates.Count == 1)
+            {
+                await _graphStore
+                    .AddEdgeAsync(entityNodeId, candidates[0].Node.Id, EdgeKinds.AliasCandidate, candidates[0].Confidence!.Value, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (!knownEntities.Any(node => node.Id == entityNodeId))
+            {
+                knownEntities.Add(new KbNode(entityNodeId, NodeKinds.Entity, mention.Key, null, null));
+            }
+        }
+    }
+
+    private async Task LinkEntityRelationshipsAsync(long chunkNodeId, string text, CancellationToken cancellationToken)
+    {
+        var entities = _entityExtractor.Extract(text);
+        if (entities.Count < 2)
+        {
+            return;
+        }
+
+        foreach (var relationship in _relationshipExtractor.Extract(text, entities))
+        {
+            var subject = await RequireEntityAsync(relationship.SubjectKey, cancellationToken).ConfigureAwait(false);
+            var target = await RequireEntityAsync(relationship.ObjectKey, cancellationToken).ConfigureAwait(false);
+            await AddRelationshipEventAsync(subject.Id, target.Id, relationship, chunkNodeId, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task AddRelationshipEventAsync(
+        long subjectNodeId,
+        long objectNodeId,
+        KbEntityRelationship relationship,
+        long? chunkNodeId,
+        CancellationToken cancellationToken)
+    {
+        var eventKey = $"event:{subjectNodeId}:{relationship.Predicate}:{objectNodeId}:{ComputeHash(relationship.Evidence)[..16]}";
+        var eventNodeId = await _graphStore
+            .UpsertNodeAsync(NodeKinds.Event, eventKey, chunkId: null, documentId: null, cancellationToken)
+            .ConfigureAwait(false);
+        await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.predicate", relationship.Predicate, cancellationToken).ConfigureAwait(false);
+        await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.evidence", relationship.Evidence, cancellationToken).ConfigureAwait(false);
+        await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.provenance", relationship.Provenance, cancellationToken).ConfigureAwait(false);
+        await _graphStore.AddEdgeAsync(subjectNodeId, eventNodeId, EdgeKinds.Subject, relationship.Confidence, cancellationToken).ConfigureAwait(false);
+        await _graphStore.AddEdgeAsync(eventNodeId, objectNodeId, EdgeKinds.Object, relationship.Confidence, cancellationToken).ConfigureAwait(false);
+        if (chunkNodeId is { } sourceChunkNodeId)
+        {
+            await _graphStore.AddEdgeAsync(sourceChunkNodeId, eventNodeId, EdgeKinds.Contains, 1.0, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await _graphStore.AddEdgeAsync(subjectNodeId, objectNodeId, EdgeKinds.AgentAsserted, relationship.Confidence, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<IReadOnlyList<KbNode>> ResolveQueryEntityNodesAsync(string query, CancellationToken cancellationToken)
+    {
+        var knownEntities = await _graphStore
+            .GetNodesByKindAsync(NodeKinds.Entity, cancellationToken)
+            .ConfigureAwait(false);
+        var resolved = new Dictionary<long, KbNode>();
+
+        foreach (var mention in _entityExtractor.Extract(query))
+        {
+            var exact = knownEntities.FirstOrDefault(node => node.Key == mention.Key);
+            if (exact is not null)
+            {
+                resolved[exact.Id] = exact;
+                continue;
+            }
+
+            var candidates = knownEntities
+                .Select(node => (Node: node, Confidence: EntityAliasResolver.GetCandidateConfidence(mention, node)))
+                .Where(candidate => candidate.Confidence is not null)
+                .ToList();
+            if (candidates.Count == 1)
+            {
+                resolved[candidates[0].Node.Id] = candidates[0].Node;
+            }
+        }
+
+        return resolved.Values.ToList();
+    }
+
+    private async Task<KbNode> RequireEntityAsync(string key, CancellationToken cancellationToken) =>
+        await _graphStore.GetNodeAsync(NodeKinds.Entity, key, cancellationToken).ConfigureAwait(false)
+        ?? throw new InvalidOperationException($"Entity '{key}' is not indexed. Run 'chimpiler kb entities' to list available entity keys.");
 
     private async Task LinkSemanticNeighboursAsync(long documentId, CancellationToken cancellationToken)
     {

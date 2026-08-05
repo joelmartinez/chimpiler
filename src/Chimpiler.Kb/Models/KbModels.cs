@@ -29,6 +29,10 @@ public static class NodeKinds
     public const string Section = "section";
     public const string Symbol = "symbol";
     public const string Type = "type";
+    public const string Entity = "entity";
+    public const string Person = "person";
+    public const string Organization = "organization";
+    public const string Event = "event";
 }
 
 /// <summary>Kinds of graph edges stored in the knowledge base.</summary>
@@ -42,10 +46,18 @@ public static class EdgeKinds
     public const string Semantic = "semantic";
     public const string Symbol = "symbol";
     public const string Type = "type";
+    public const string Mentions = "mentions";
+    public const string AliasCandidate = "alias-candidate";
+    public const string Subject = "subject";
+    public const string Object = "object";
+    public const string AgentAsserted = "agent-asserted";
 }
 
 /// <summary>A node in the knowledge graph.</summary>
 public sealed record KbNode(long Id, string Kind, string Key, long? ChunkId, long? DocumentId);
+
+/// <summary>An extracted entity available for graph traversal or agent enrichment.</summary>
+public sealed record KbEntity(string Key, string Kind, string Surface);
 
 /// <summary>An edge in the knowledge graph.</summary>
 public sealed record KbEdge(long Id, long SourceNodeId, long TargetNodeId, string Kind, double Weight);

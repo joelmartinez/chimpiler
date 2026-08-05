@@ -32,11 +32,14 @@ internal static class KbCommandFactory
         kbCommand.AddCommand(CreateAdd(dbOption, modelOption));
         kbCommand.AddCommand(CreateRemove(dbOption, modelOption));
         kbCommand.AddCommand(CreateList(dbOption, modelOption));
+        kbCommand.AddCommand(CreateEntities(dbOption, modelOption));
+        kbCommand.AddCommand(CreateRelate(dbOption, modelOption));
         kbCommand.AddCommand(CreateSearch(dbOption, modelOption, graph: false));
         kbCommand.AddCommand(CreateSearch(dbOption, modelOption, graph: true));
         kbCommand.AddCommand(CreateRebuild(dbOption, modelOption));
         kbCommand.AddCommand(CreateOptimize(dbOption, modelOption));
         kbCommand.AddCommand(CreateModels());
+        kbCommand.AddCommand(CreateAgentPrompt());
 
         return kbCommand;
     }
@@ -211,6 +214,62 @@ internal static class KbCommandFactory
         return command;
     }
 
+    private static Command CreateEntities(Option<string> dbOption, Option<string?> modelOption)
+    {
+        var command = new Command("entities", "List entity keys available for graph retrieval and enrichment");
+        command.SetHandler(async (string db, string? model) =>
+        {
+            await RunAsync(db, model, async kb =>
+            {
+                await kb.InitializeAsync();
+                var entities = await kb.ListEntitiesAsync();
+                if (entities.Count == 0)
+                {
+                    Console.WriteLine("No entities indexed.");
+                    return;
+                }
+
+                foreach (var entity in entities)
+                {
+                    Console.WriteLine($"{entity.Key}  [{entity.Kind}]  {entity.Surface}");
+                }
+            });
+        }, dbOption, modelOption);
+        return command;
+    }
+
+    private static Command CreateRelate(Option<string> dbOption, Option<string?> modelOption)
+    {
+        var command = new Command("relate", "Add an agent-confirmed relationship between indexed entity keys");
+        var subjectArg = new Argument<string>("subject", "Subject entity key from `kb entities`");
+        var predicateArg = new Argument<string>("predicate", "Normalized relationship verb, such as 'authorized'");
+        var objectArg = new Argument<string>("object", "Object entity key from `kb entities`");
+        var evidenceOption = new Option<string>("--evidence", "Source evidence supporting the relationship") { IsRequired = true };
+        var confidenceOption = new Option<double>("--confidence", () => 0.9, "Confidence from 0 through 1");
+        command.AddArgument(subjectArg);
+        command.AddArgument(predicateArg);
+        command.AddArgument(objectArg);
+        command.AddOption(evidenceOption);
+        command.AddOption(confidenceOption);
+
+        command.SetHandler(async (string db, string? model, string subject, string predicate, string target, string evidence, double confidence) =>
+        {
+            await RunAsync(db, model, async kb =>
+            {
+                await kb.InitializeAsync();
+                await kb.AddEntityRelationshipAsync(new KbEntityRelationship(
+                    subject,
+                    predicate,
+                    target,
+                    evidence,
+                    confidence,
+                    "agent-asserted"));
+                Console.WriteLine($"Added '{predicate}' relationship from {subject} to {target}.");
+            });
+        }, dbOption, modelOption, subjectArg, predicateArg, objectArg, evidenceOption, confidenceOption);
+        return command;
+    }
+
     private static Command CreateRebuild(Option<string> dbOption, Option<string?> modelOption)
     {
         var command = new Command("rebuild", "Re-chunk and re-embed every indexed document");
@@ -298,6 +357,35 @@ internal static class KbCommandFactory
         models.AddCommand(remove);
 
         return models;
+    }
+
+    private static Command CreateAgentPrompt()
+    {
+        var command = new Command("prompt", "Print concise instructions for an agent harness using the knowledge base");
+        command.SetHandler(() => Console.WriteLine("""
+            You can use `chimpiler kb` as a local knowledge-retrieval tool.
+
+            Setup:
+            - `chimpiler kb init`
+            - `chimpiler kb add <file-or-directory> --pattern "*.md"`
+            - `chimpiler kb list`
+
+            Retrieval:
+            - Use `chimpiler kb search "<question>" --top 5` for direct semantic retrieval.
+            - Use `chimpiler kb graph-search "<question>" --top 3 --depth 3` when the answer may require aliases, entities, or multi-document connections.
+            - Results marked `(graph)` were reached through graph relationships. Treat them as leads, then read and verify the cited source text before making a claim.
+
+            Entity graph:
+            - The KB locally extracts conservative person and organization mentions.
+            - Nickname and acronym relationships (for example Bob/Robert or Electronic Arts/EA) are candidate aliases, not proven identity. Resolve ambiguity from source evidence.
+            - Use `chimpiler kb entities` to inspect entity keys. When you verify a relationship, add it with `chimpiler kb relate <subject-key> <predicate> <object-key> --evidence "<quoted source>"`.
+            - Agent-added relationships are evidence-bearing graph augmentations; only add them after verifying the cited source.
+
+            Models:
+            - `chimpiler kb models install default` installs the local embedding model.
+            - Add `--model default` to `init`, `add`, `search`, and `graph-search` for semantic ONNX embeddings; omit it for the offline hash fallback.
+            """));
+        return command;
     }
 
     private static async Task RunAsync(
