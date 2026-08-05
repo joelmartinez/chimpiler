@@ -10,6 +10,28 @@ chimpiler kb add ./docs
 chimpiler kb graph-search "how do I generate a dacpac?"
 ```
 
+## Agent quick start
+
+`kb` is intended to be used directly by local CLI agents and agent harnesses. Install the global
+tool if it is not already available:
+
+```bash
+dotnet tool install --global Chimpiler
+# or, if it is already installed:
+dotnet tool update --global Chimpiler
+```
+
+Then have the agent run:
+
+```bash
+chimpiler kb prompt
+```
+
+The command prints compact operating instructions for indexing, local model installation,
+relationship-aware retrieval, source verification, and evidence-bearing graph enrichment. The
+repository README also provides a copy-paste bootstrap prompt for an agent that has not yet
+installed Chimpiler.
+
 ## Design
 
 | Concern | Abstraction | Default implementation |
@@ -197,9 +219,10 @@ Manages the local ONNX model cache.
 
 ### `chimpiler kb prompt`
 
-Prints compact, agent-ready operating guidance. Agent harnesses can inject the output into an
-agent's context before it calls the CLI. It explains indexing, direct and graph retrieval, local
-model selection, and the evidence requirements for graph-expanded alias relationships.
+Prints self-contained installation and operating guidance. Agent harnesses can inject the output
+into an agent's context before it calls the CLI. It explains acquiring Chimpiler with `dotnet tool
+install --global Chimpiler`, indexing, direct and graph retrieval, local model selection, and the
+evidence requirements for graph-expanded aliases and agent-added relationships.
 
 ```bash
 chimpiler kb prompt

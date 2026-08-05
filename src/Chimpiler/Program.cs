@@ -23,7 +23,7 @@ class Program
             return 0;
         }
 
-        var rootCommand = new RootCommand("Chimpiler - A multi-purpose CLI tooling ecosystem");
+        var rootCommand = new RootCommand("Chimpiler - Agent-ready local GraphRAG and .NET CLI tooling");
 
         // Create the ef-migrate command
         var efMigrateCommand = CreateEfMigrateCommand();
@@ -74,7 +74,7 @@ class Program
 
     static void ShowGeneralHelp()
     {
-        Console.WriteLine("Chimpiler - A multi-purpose CLI tooling ecosystem");
+        Console.WriteLine("Chimpiler - Agent-ready local GraphRAG and .NET CLI tooling");
         Console.WriteLine();
         Console.WriteLine("Usage:");
         Console.WriteLine("  chimpiler [command] [options]");
@@ -82,7 +82,7 @@ class Program
         Console.WriteLine("Available Commands:");
         Console.WriteLine("  ef-migrate    Generate DACPACs from EF Core DbContext models");
         Console.WriteLine("  clawcker      Manage local OpenClaw instances using Docker");
-        Console.WriteLine("  kb            Local GraphRAG knowledge base backed by SQLite");
+        Console.WriteLine("  kb            Agent-ready local GraphRAG knowledge base backed by SQLite");
         Console.WriteLine("  help          Display help information for Chimpiler or a specific subcommand");
         Console.WriteLine();
         Console.WriteLine("Options:");
@@ -90,6 +90,7 @@ class Program
         Console.WriteLine("  --version         Show version information");
         Console.WriteLine();
         Console.WriteLine("Use 'chimpiler help [command]' for more information about a command.");
+        Console.WriteLine("For agent instructions after installation, run 'chimpiler kb prompt'.");
     }
 
     static void ShowSubcommandHelp(string subcommand)

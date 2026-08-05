@@ -12,7 +12,7 @@ internal static class KbCommandFactory
 {
     public static Command Create()
     {
-        var kbCommand = new Command("kb", "Local, offline GraphRAG knowledge base backed by SQLite");
+        var kbCommand = new Command("kb", "Agent-ready, local GraphRAG knowledge base backed by SQLite");
 
         var dbOption = new Option<string>(
             name: "--db",
@@ -361,9 +361,14 @@ internal static class KbCommandFactory
 
     private static Command CreateAgentPrompt()
     {
-        var command = new Command("prompt", "Print concise instructions for an agent harness using the knowledge base");
+        var command = new Command("prompt", "Print install and usage instructions for a local agent harness");
         command.SetHandler(() => Console.WriteLine("""
-            You can use `chimpiler kb` as a local knowledge-retrieval tool.
+            You can use `chimpiler kb` as a local, agent-ready knowledge-retrieval tool.
+
+            Bootstrap:
+            - If `chimpiler` is unavailable, install it with `dotnet tool install --global Chimpiler`.
+            - If it is already installed, update it with `dotnet tool update --global Chimpiler`.
+            - Run `chimpiler kb prompt` again after installation to get this guidance.
 
             Setup:
             - `chimpiler kb init`

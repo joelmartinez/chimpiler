@@ -40,6 +40,7 @@ public sealed class KbCliIntegrationTests : IDisposable
         Assert.Contains("graph-search", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("candidate aliases", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("read and verify", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("dotnet tool install --global Chimpiler", prompt.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]

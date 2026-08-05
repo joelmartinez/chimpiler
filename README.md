@@ -49,7 +49,9 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 ### `chimpiler kb` — Local GraphRAG Knowledge Base
 
 The `kb` command builds and queries a completely local, zero-cloud, zero-Python knowledge base
-stored in a single SQLite file. Install once, run a command, and everything else just works.
+stored in a single SQLite file. It is designed for local CLI and agent harness use: agents can
+retrieve direct evidence, traverse entities and relationships, and add verified graph facts with
+provenance.
 
 ```bash
 chimpiler kb init
@@ -61,10 +63,30 @@ chimpiler kb graph-search "how do I generate a dacpac?"
 - ✅ SQLite is the only database — no server, no Python, no cloud
 - ✅ Local ONNX embedding models, downloaded on first use
 - ✅ Vectors and a lightweight knowledge graph in the same file
-- ✅ Semantic search plus graph-enhanced retrieval
+- ✅ Semantic search plus entity-, relationship-, and alias-aware graph retrieval
+- ✅ Agent-ready prompt, entity inspection, and evidence-bearing relationship enrichment
 - ✅ Pluggable `IEmbeddingProvider` for future cloud providers
 
 [Learn more about kb →](docs/cli/kb.md)
+
+### Give a local agent this prompt
+
+Copy this into a local/CLI agent harness before asking it to use a knowledge base:
+
+```text
+Use Chimpiler's local KB as your knowledge-retrieval tool.
+
+If `chimpiler` is not available, install it with:
+dotnet tool install --global Chimpiler
+
+Then run:
+chimpiler kb prompt
+
+Follow that output. Use `chimpiler kb search` for direct evidence and
+`chimpiler kb graph-search --depth 3` when an answer may require aliases, entities, or
+multi-document relationships. Cite returned source paths, treat `(graph)` results as leads to
+verify, and only add `chimpiler kb relate` facts when you have supporting evidence.
+```
 
 ## Installation
 
@@ -81,6 +103,9 @@ To update to the latest version:
 ```bash
 dotnet tool update -g Chimpiler
 ```
+
+After installation, run `chimpiler kb prompt` for concise instructions that can be injected into a
+local agent's context.
 
 ### From Source
 
