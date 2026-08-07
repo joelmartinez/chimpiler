@@ -102,7 +102,7 @@ jobs:
           version=$(find ./artifacts -maxdepth 1 -name 'Chimpiler.[0-9]*.nupkg' -printf '%f\n' | sed -E 's/^Chimpiler\.([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.nupkg$/\1/' | head -n 1)
           test -n "$version"
           package_url="https://api.nuget.org/v3-flatcontainer/chimpiler/$version/chimpiler.$version.nupkg"
-          for attempt in {1..60}; do
+          for attempt in {1..120}; do
             rm -rf ./published-tool-smoke
             if curl --fail --silent --show-error --output /dev/null "$package_url" \
               && dotnet tool install --tool-path ./published-tool-smoke Chimpiler --version "$version" --add-source "https://api.nuget.org/v3/index.json" --ignore-failed-sources; then
@@ -113,5 +113,5 @@ jobs:
             sleep 10
           done
 
-          echo "Chimpiler $version was not available from NuGet.org after 10 minutes." >&2
+          echo "Chimpiler $version was not available from NuGet.org after 20 minutes." >&2
           exit 1
