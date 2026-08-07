@@ -77,7 +77,7 @@ Copy this into a local/CLI agent harness before asking it to use a knowledge bas
 Use Chimpiler's local KB as your knowledge-retrieval tool.
 
 If `chimpiler` is not available, install it with:
-dotnet tool install --global Chimpiler
+dotnet tool install --global Chimpiler --add-source https://api.nuget.org/v3/index.json --ignore-failed-sources
 
 Then run:
 chimpiler kb prompt
@@ -102,6 +102,14 @@ To update to the latest version:
 
 ```bash
 dotnet tool update -g Chimpiler
+```
+
+If a configured package mirror reports an older version or the installed CLI lacks `kb`, use
+NuGet.org explicitly:
+
+```bash
+dotnet tool update -g Chimpiler --add-source https://api.nuget.org/v3/index.json --ignore-failed-sources
+chimpiler kb --help
 ```
 
 After installation, run `chimpiler kb prompt` for concise instructions that can be injected into a

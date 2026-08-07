@@ -21,6 +21,14 @@ dotnet tool install --global Chimpiler
 dotnet tool update --global Chimpiler
 ```
 
+If a configured package mirror is behind NuGet.org or `chimpiler kb --help` is unavailable after
+the update, install directly from NuGet.org:
+
+```bash
+dotnet tool update --global Chimpiler --add-source https://api.nuget.org/v3/index.json --ignore-failed-sources
+chimpiler kb --help
+```
+
 Then have the agent run:
 
 ```bash

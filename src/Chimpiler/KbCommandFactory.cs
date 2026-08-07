@@ -368,6 +368,7 @@ internal static class KbCommandFactory
             Bootstrap:
             - If `chimpiler` is unavailable, install it with `dotnet tool install --global Chimpiler`.
             - If it is already installed, update it with `dotnet tool update --global Chimpiler`.
+            - If a package mirror provides an older CLI without `kb`, add `--add-source https://api.nuget.org/v3/index.json --ignore-failed-sources` to the install or update command.
             - Run `chimpiler kb prompt` again after installation to get this guidance.
 
             Setup:

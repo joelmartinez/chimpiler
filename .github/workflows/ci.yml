@@ -54,7 +54,14 @@ jobs:
     
     - name: Pack Chimpiler CLI tool
       run: dotnet pack src/Chimpiler/Chimpiler.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.cli_full_version }}
-    
+
+    - name: Smoke test packed Chimpiler CLI tool
+      shell: bash
+      run: |
+        set -euo pipefail
+        dotnet tool install --tool-path ./tool-smoke --add-source ./artifacts Chimpiler --version "${{ steps.version.outputs.cli_full_version }}"
+        ./tool-smoke/chimpiler kb --help
+
     - name: Pack Chimpiler.EfMigrate library
       run: dotnet pack src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.lib_full_version }}
     
@@ -87,3 +94,22 @@ jobs:
 
       - name: Push to nuget.org
         run: dotnet nuget push "./artifacts/*.nupkg" --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source "https://api.nuget.org/v3/index.json" --skip-duplicate
+
+      - name: Smoke test published Chimpiler CLI tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(find ./artifacts -maxdepth 1 -name 'Chimpiler.[0-9]*.nupkg' -printf '%f\n' | sed -E 's/^Chimpiler\.([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\.nupkg$/\1/' | head -n 1)
+          test -n "$version"
+          for attempt in {1..12}; do
+            rm -rf ./published-tool-smoke
+            if dotnet tool install --tool-path ./published-tool-smoke Chimpiler --version "$version" --add-source "https://api.nuget.org/v3/index.json" --ignore-failed-sources; then
+              ./published-tool-smoke/chimpiler kb --help
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Chimpiler $version was not installable with the kb command from NuGet.org." >&2
+          exit 1
