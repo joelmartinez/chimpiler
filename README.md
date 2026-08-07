@@ -50,8 +50,8 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 
 The `kb` command builds and queries a completely local, zero-cloud, zero-Python knowledge base
 stored in a single SQLite file. It is designed for local CLI and agent harness use: agents can
-retrieve direct evidence, traverse entities and relationships, and add verified graph facts with
-provenance.
+retrieve direct evidence, then maintain a focused, evidence-backed graph of entities and
+relationships using the agent's own reasoning.
 
 ```bash
 chimpiler kb init
@@ -63,8 +63,8 @@ chimpiler kb graph-search "how do I generate a dacpac?"
 - ✅ SQLite is the only database — no server, no Python, no cloud
 - ✅ Local ONNX embedding models, downloaded on first use
 - ✅ Vectors and a lightweight knowledge graph in the same file
-- ✅ Semantic search plus entity-, relationship-, and alias-aware graph retrieval
-- ✅ Agent-ready prompt, entity inspection, and evidence-bearing relationship enrichment
+- ✅ Semantic search plus bounded traversal of agent-authored evidence relationships
+- ✅ Agent-ready prompt, entity registration, and evidence-bearing relationship enrichment
 - ✅ Pluggable `IEmbeddingProvider` for future cloud providers
 
 [Learn more about kb →](docs/cli/kb.md)
@@ -82,10 +82,11 @@ dotnet tool install --global Chimpiler --add-source https://api.nuget.org/v3/ind
 Then run:
 chimpiler kb prompt
 
-Follow that output. Use `chimpiler kb search` for direct evidence and
-`chimpiler kb graph-search --depth 3` when an answer may require aliases, entities, or
-multi-document relationships. Cite returned source paths, treat `(graph)` results as leads to
-verify, and only add `chimpiler kb relate` facts when you have supporting evidence.
+Follow that output. Use `chimpiler kb search` for direct evidence. Delegate distinct source themes
+to subagents when useful, returning only cited entity/relationship candidates to the orchestrator.
+Register only verified entities and relationships, then use `chimpiler kb graph-search --depth 3`
+to follow those focused evidence links. Cite returned source paths and treat `(graph)` results as
+leads to verify.
 ```
 
 ## Installation

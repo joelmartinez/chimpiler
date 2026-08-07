@@ -6,5 +6,6 @@ public sealed record KbEntityRelationship(
     string Predicate,
     string ObjectKey,
     string Evidence,
+    string SourcePath,
     double Confidence = 1.0,
-    string Provenance = "local-extraction");
+    string Provenance = "agent-asserted");

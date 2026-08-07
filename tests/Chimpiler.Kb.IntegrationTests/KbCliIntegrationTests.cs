@@ -38,13 +38,14 @@ public sealed class KbCliIntegrationTests : IDisposable
         var prompt = await RunCliAsync("kb", "prompt");
 
         Assert.Contains("graph-search", prompt.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("candidate aliases", prompt.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("read and verify", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("does not infer entities", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("subagent", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Verify their cited source text", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("dotnet tool install --global Chimpiler", prompt.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task GraphSearch_TraversesTertiarySemanticConnectionsAcrossDocuments()
+    public async Task GraphSearch_TraversesAgentAuthoredCrossDocumentConnections()
     {
         var database = Path.Combine(_directory, "semantic-chain.db");
         var corpus = Path.Combine(AppContext.BaseDirectory, "Fixtures", "semantic-chain");
@@ -54,26 +55,30 @@ public sealed class KbCliIntegrationTests : IDisposable
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "atlas.md"));
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "heliostat.md"));
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "configuration.md"));
+        var atlas = Path.Combine(corpus, "atlas.md");
+        var heliostat = Path.Combine(corpus, "heliostat.md");
+        var configuration = Path.Combine(corpus, "configuration.md");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "system:atlas", "--kind", "system", "--surface", "Atlas array", "--source", atlas, "--evidence", "Atlas array");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "system:heliostat", "--kind", "system", "--surface", "heliostat", "--source", heliostat, "--evidence", "heliostat");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "setting:sun-target-bias", "--kind", "setting", "--surface", "sunTargetBias", "--source", configuration, "--evidence", "sunTargetBias");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "relate", "system:atlas", "uses", "system:heliostat", "--source", atlas, "--evidence", "Atlas array");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "relate", "system:heliostat", "configured-by", "setting:sun-target-bias", "--source", heliostat, "--evidence", "heliostat");
 
         var vectorSearch = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "search",
             "Which setting controls the Atlas array sunward hold mode?", "--top", "1");
-        var oneHopGraphSearch = await RunCliAsync(
+        var graphSearch = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "graph-search",
-            "Which setting controls the Atlas array sunward hold mode?", "--top", "1", "--depth", "1");
-        var twoHopGraphSearch = await RunCliAsync(
-            "kb", "--db", database, "--model", "default", "graph-search",
-            "Which setting controls the Atlas array sunward hold mode?", "--top", "1", "--depth", "2");
+            "Which setting controls the Atlas array sunward hold mode?", "--top", "3", "--depth", "7");
 
         Assert.Contains("atlas.md", vectorSearch.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("configuration.md", vectorSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.DoesNotContain("configuration.md", oneHopGraphSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("configuration.md", twoHopGraphSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("sunTargetBias", twoHopGraphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("configuration.md", graphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("sunTargetBias", graphSearch.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task GraphSearch_TraversesCandidatePersonAndOrganizationAliasesAcrossDocuments()
+    public async Task GraphSearch_TraversesAgentVerifiedAliasesAcrossDocuments()
     {
         var database = Path.Combine(_directory, "entity-aliases.db");
         var corpus = Path.Combine(AppContext.BaseDirectory, "Fixtures", "entity-aliases");
@@ -84,6 +89,11 @@ public sealed class KbCliIntegrationTests : IDisposable
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "robert.md"));
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "electronic-arts.md"));
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "ea.md"));
+        var bob = Path.Combine(corpus, "bob.md");
+        var robert = Path.Combine(corpus, "robert.md");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "person:bob tagart", "--kind", "person", "--surface", "Bob Tagart", "--source", bob, "--evidence", "Bob Tagart");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "person:robert tagart", "--kind", "person", "--surface", "Robert Tagart", "--source", robert, "--evidence", "Robert Tagart");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "relate", "person:bob tagart", "alias-candidate", "person:robert tagart", "--source", bob, "--evidence", "Bob Tagart");
 
         var bobVectorSearch = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "search",
@@ -91,25 +101,15 @@ public sealed class KbCliIntegrationTests : IDisposable
         var bobGraphSearch = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "graph-search",
             "What did Bob Tagart authorize?", "--top", "1", "--depth", "3");
-        var eaVectorSearch = await RunCliAsync(
-            "kb", "--db", database, "--model", "default", "search",
-            "What did EA authorize?", "--top", "1");
-        var eaGraphSearch = await RunCliAsync(
-            "kb", "--db", database, "--model", "default", "graph-search",
-            "What did EA authorize?", "--top", "1", "--depth", "3");
 
         Assert.Contains("bob.md", bobVectorSearch.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("robert.md", bobVectorSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("robert.md", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("crimsonLedger", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("ea.md", eaVectorSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.DoesNotContain("electronic-arts.md", eaVectorSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("electronic-arts.md", eaGraphSearch.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("NorthstarLedger", eaGraphSearch.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task GraphSearch_UsesExplicitEntityRelationshipsAndQueryAliases()
+    public async Task GraphSearch_UsesAgentRegisteredEntityRelationships()
     {
         var database = Path.Combine(_directory, "relationships.db");
         var corpus = Path.Combine(AppContext.BaseDirectory, "Fixtures", "relationships");
@@ -118,18 +118,22 @@ public sealed class KbCliIntegrationTests : IDisposable
         await RunCliAsync("kb", "--db", database, "--model", "default", "init");
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "authorization.md"));
         await RunCliAsync("kb", "--db", database, "--model", "default", "add", Path.Combine(corpus, "record.md"));
+        var authorization = Path.Combine(corpus, "authorization.md");
+        var record = Path.Combine(corpus, "record.md");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "person:bob tagart", "--kind", "person", "--surface", "Bob Tagart", "--source", authorization, "--evidence", "Bob Tagart");
+        await RunCliAsync("kb", "--db", database, "--model", "default", "entity", "organization:electronic arts", "--kind", "organization", "--surface", "Electronic Arts", "--source", record, "--evidence", "Electronic Arts");
         var entities = await RunCliAsync("kb", "--db", database, "--model", "default", "entities");
         var assertion = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "relate",
             "person:bob tagart", "authorized", "organization:electronic arts",
-            "--evidence", "Verified by the release authorization.", "--confidence", "0.9");
+            "--source", authorization, "--evidence", "Bob Tagart", "--confidence", "0.9");
 
         var direct = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "search",
-            "What did Robert Tagart authorize?", "--top", "1");
+            "What did Bob Tagart authorize?", "--top", "1");
         var graph = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "graph-search",
-            "What did Robert Tagart authorize?", "--top", "1", "--depth", "3");
+            "What did Bob Tagart authorize?", "--top", "1", "--depth", "4");
 
         Assert.Contains("person:bob tagart", entities.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("organization:electronic arts", entities.StandardOutput, StringComparison.Ordinal);

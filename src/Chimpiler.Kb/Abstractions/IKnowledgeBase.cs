@@ -18,12 +18,15 @@ public interface IKnowledgeBase
 
     Task<IReadOnlyList<KbEntity>> ListEntitiesAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Registers an agent-verified entity mention tied to evidence in an indexed source.</summary>
+    Task RegisterEntityAsync(KbEntityMention entity, string evidence, string sourcePath, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default);
 
-    /// <summary>Vector search followed by graph expansion of related nodes.</summary>
+    /// <summary>Vector search followed by bounded expansion through agent-authored evidence edges.</summary>
     Task<IReadOnlyList<SearchResult>> GraphSearchAsync(string query, int topK = 5, int depth = 1, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds an agent-confirmed relationship between previously indexed entity keys.</summary>
+    /// <summary>Adds an agent-confirmed relationship between previously registered entity keys.</summary>
     Task AddEntityRelationshipAsync(KbEntityRelationship relationship, CancellationToken cancellationToken = default);
 
     /// <summary>Re-chunks and re-embeds every known document.</summary>

@@ -51,6 +51,7 @@ public static class EdgeKinds
     public const string Subject = "subject";
     public const string Object = "object";
     public const string AgentAsserted = "agent-asserted";
+    public const string Evidence = "evidence";
 }
 
 /// <summary>A node in the knowledge graph.</summary>

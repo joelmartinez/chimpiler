@@ -33,6 +33,7 @@ internal static class KbCommandFactory
         kbCommand.AddCommand(CreateRemove(dbOption, modelOption));
         kbCommand.AddCommand(CreateList(dbOption, modelOption));
         kbCommand.AddCommand(CreateEntities(dbOption, modelOption));
+        kbCommand.AddCommand(CreateEntity(dbOption, modelOption));
         kbCommand.AddCommand(CreateRelate(dbOption, modelOption));
         kbCommand.AddCommand(CreateSearch(dbOption, modelOption, graph: false));
         kbCommand.AddCommand(CreateSearch(dbOption, modelOption, graph: true));
@@ -238,21 +239,49 @@ internal static class KbCommandFactory
         return command;
     }
 
+    private static Command CreateEntity(Option<string> dbOption, Option<string?> modelOption)
+    {
+        var command = new Command("entity", "Register an agent-verified entity mention from an indexed source");
+        var keyArg = new Argument<string>("key", "Stable entity key, such as 'person:bob tagart' or 'concept:root cause culture'");
+        var kindOption = new Option<string>("--kind", "Entity type, such as person, organization, or concept") { IsRequired = true };
+        var surfaceOption = new Option<string>("--surface", "Exact entity text in the source") { IsRequired = true };
+        var sourceOption = new Option<string>("--source", "Indexed source path containing the evidence") { IsRequired = true };
+        var evidenceOption = new Option<string>("--evidence", "Exact source text supporting the entity") { IsRequired = true };
+        command.AddArgument(keyArg);
+        command.AddOption(kindOption);
+        command.AddOption(surfaceOption);
+        command.AddOption(sourceOption);
+        command.AddOption(evidenceOption);
+
+        command.SetHandler(async (string db, string? model, string key, string kind, string surface, string source, string evidence) =>
+        {
+            await RunAsync(db, model, async kb =>
+            {
+                await kb.InitializeAsync();
+                await kb.RegisterEntityAsync(new KbEntityMention(kind, surface, key), evidence, source);
+                Console.WriteLine($"Registered '{key}' from {Path.GetFullPath(source)}.");
+            });
+        }, dbOption, modelOption, keyArg, kindOption, surfaceOption, sourceOption, evidenceOption);
+        return command;
+    }
+
     private static Command CreateRelate(Option<string> dbOption, Option<string?> modelOption)
     {
-        var command = new Command("relate", "Add an agent-confirmed relationship between indexed entity keys");
+        var command = new Command("relate", "Add an agent-confirmed relationship between registered entity keys");
         var subjectArg = new Argument<string>("subject", "Subject entity key from `kb entities`");
         var predicateArg = new Argument<string>("predicate", "Normalized relationship verb, such as 'authorized'");
         var objectArg = new Argument<string>("object", "Object entity key from `kb entities`");
         var evidenceOption = new Option<string>("--evidence", "Source evidence supporting the relationship") { IsRequired = true };
+        var sourceOption = new Option<string>("--source", "Indexed source path containing the evidence") { IsRequired = true };
         var confidenceOption = new Option<double>("--confidence", () => 0.9, "Confidence from 0 through 1");
         command.AddArgument(subjectArg);
         command.AddArgument(predicateArg);
         command.AddArgument(objectArg);
         command.AddOption(evidenceOption);
+        command.AddOption(sourceOption);
         command.AddOption(confidenceOption);
 
-        command.SetHandler(async (string db, string? model, string subject, string predicate, string target, string evidence, double confidence) =>
+        command.SetHandler(async (string db, string? model, string subject, string predicate, string target, string evidence, string source, double confidence) =>
         {
             await RunAsync(db, model, async kb =>
             {
@@ -262,11 +291,12 @@ internal static class KbCommandFactory
                     predicate,
                     target,
                     evidence,
+                    source,
                     confidence,
                     "agent-asserted"));
                 Console.WriteLine($"Added '{predicate}' relationship from {subject} to {target}.");
             });
-        }, dbOption, modelOption, subjectArg, predicateArg, objectArg, evidenceOption, confidenceOption);
+        }, dbOption, modelOption, subjectArg, predicateArg, objectArg, evidenceOption, sourceOption, confidenceOption);
         return command;
     }
 
@@ -378,14 +408,16 @@ internal static class KbCommandFactory
 
             Retrieval:
             - Use `chimpiler kb search "<question>" --top 5` for direct semantic retrieval.
-            - Use `chimpiler kb graph-search "<question>" --top 3 --depth 3` when the answer may require aliases, entities, or multi-document connections.
-            - Results marked `(graph)` were reached through graph relationships. Treat them as leads, then read and verify the cited source text before making a claim.
+            - Read the cited source chunks before making connections. For broad questions, delegate one focused source/theme to each subagent, then return only evidence, entity candidates, and relationships to the orchestrator.
+            - Use `chimpiler kb graph-search "<question>" --top 3 --depth 3` only after you have added relevant evidence-backed graph facts. It traverses agent-authored evidence edges, not document structure.
+            - Results marked `(graph)` are leads reached through agent-authored relationships. Verify their cited source text before making a claim.
 
             Entity graph:
-            - The KB locally extracts conservative person and organization mentions.
-            - Nickname and acronym relationships (for example Bob/Robert or Electronic Arts/EA) are candidate aliases, not proven identity. Resolve ambiguity from source evidence.
-            - Use `chimpiler kb entities` to inspect entity keys. When you verify a relationship, add it with `chimpiler kb relate <subject-key> <predicate> <object-key> --evidence "<quoted source>"`.
-            - Agent-added relationships are evidence-bearing graph augmentations; only add them after verifying the cited source.
+            - KB indexes chunks and local embeddings; it does not infer entities, aliases, or relationships from prose. Use your reasoning over cited chunks to decide what is worth adding.
+            - Register every entity with exact source evidence: `chimpiler kb entity <key> --kind <type> --surface "<exact text>" --source <path> --evidence "<quoted source>"`.
+            - Model ambiguous aliases explicitly as evidence-backed relationships instead of assuming identity.
+            - Use `chimpiler kb entities` to inspect registered keys. Add verified relationships with `chimpiler kb relate <subject-key> <predicate> <object-key> --source <path> --evidence "<quoted source>"`.
+            - Do not add speculative or uncited facts. The graph is an agent-maintained evidence index, not an automatic truth extractor.
 
             Models:
             - `chimpiler kb models install default` installs the local embedding model.

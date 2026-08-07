@@ -19,8 +19,8 @@ public interface IGraphStore
 
     Task<KbNode?> GetNodeAsync(string kind, string key, CancellationToken cancellationToken = default);
 
-    /// <summary>Expands outward from the given nodes up to <paramref name="depth"/> hops, returning reachable chunk ids.</summary>
-    Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, CancellationToken cancellationToken = default);
+    /// <summary>Expands outward through the allowed edge kinds up to <paramref name="depth"/> hops.</summary>
+    Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default);
 
     Task ClearAsync(CancellationToken cancellationToken = default);
 }

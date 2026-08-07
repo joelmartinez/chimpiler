@@ -36,7 +36,7 @@ chimpiler kb prompt
 ```
 
 The command prints compact operating instructions for indexing, local model installation,
-relationship-aware retrieval, source verification, and evidence-bearing graph enrichment. The
+source verification, and agent-directed graph enrichment. The
 repository README also provides a copy-paste bootstrap prompt for an agent that has not yet
 installed Chimpiler.
 
@@ -70,54 +70,48 @@ cosine similarity is a single dot product at query time.
 
 ## Knowledge graph
 
-Indexing creates one `document` node per file and one `chunk` node per chunk, plus `section`
-nodes for markdown headings and code declarations. It also extracts conservative local person,
-organization, and organization-initialism mentions. Each chunk links to its entity mentions; known
-nickname variants (such as Bob/Robert with the same surname) and unambiguous organization
-initialisms (such as Electronic Arts/EA) receive `alias-candidate` edges. These are intentionally
-candidate relationships, not assertions of identity: an acronym with more than one possible
-organization expansion is left unlinked. Each chunk also links to its strongest
-cross-document semantic neighbour when its cosine similarity is at least 0.55; small lexical
-overlap weighting avoids generic semantic hubs bypassing a more specific concept. Edges express
-`contains`, `child`, `section`, `semantic`, `parent`, `references`, `symbol` and `type`
-relationships. Traversal loads the relevant edges and walks them in memory.
+Indexing creates one `document` node per file and one `chunk` node per chunk, plus structural
+nodes for headings and chunk order. It deliberately does **not** infer people, organizations,
+aliases, or relationships from prose. Those judgments belong to the agent reviewing the retrieved
+source, where ambiguity and context can be handled explicitly rather than through brittle local
+rules.
 
 ```
 Document
  └── Chunk
-      ├── references
-      ├── parent
-      ├── child
-      ├── section
-      ├── symbol
-      ├── type
-      └── mentions → Entity ── alias-candidate ── Entity
+      └── agent-verified mention → Entity ← agent-verified evidence → Event
 ```
 
-Explicit local action statements with two recognized entities (for example, `Bob Tagart authorized
-Electronic Arts`) also create an `event` node with `subject` and `object` edges. `graph-search`
-extracts entities from the incoming question too, adds matching or unambiguous alias entity nodes
-as traversal seeds, then combines those graph results with vector-search hits.
+An agent can register an entity tied to exact text in an indexed source, then add a typed,
+evidence-backed relationship between registered entities. `graph-search` starts from vector hits
+and traverses only those agent-authored mention, evidence, subject, and object edges. It never
+walks document containment, heading, or sibling-chunk edges, and returns at most one expanded chunk
+per document (up to the requested direct-result count).
 
-An agent harness can inspect entities and add a verified, evidence-bearing relationship:
+An agent harness should first retrieve and read sources. It can parallelize that work by assigning
+separate source themes to subagents; subagents should return only cited evidence and proposed
+entity/relationship records to the orchestrator. The orchestrator verifies and records them:
 
 ```bash
-chimpiler kb entities
-chimpiler kb relate "person:bob tagart" authorized "organization:electronic arts" \
-  --evidence "Bob Tagart authorized Electronic Arts."
+chimpiler kb entity "person:bob-tagart" --kind person --surface "Bob Tagart" \
+  --source ./briefing.md --evidence "Bob Tagart authorized Electronic Arts."
+chimpiler kb entity "organization:electronic-arts" --kind organization --surface "Electronic Arts" \
+  --source ./briefing.md --evidence "Bob Tagart authorized Electronic Arts."
+chimpiler kb relate "person:bob-tagart" authorized "organization:electronic-arts" \
+  --source ./briefing.md --evidence "Bob Tagart authorized Electronic Arts."
 ```
 
-Use the exact keys printed by `kb entities`. Agent-added relationships are marked separately from
-local extraction and must only be added after verifying their cited source.
+Use stable keys and inspect them with `kb entities`. An alias is just another evidence-backed
+relationship (for example, `alias-candidate`); never treat it as proof without source review.
 
 ## Search pipeline
 
 ```
-Query → Embedding → Vector search → Top K chunks → Graph expansion → Rank → Results
+Query → Embedding → Vector search → Top K chunks → Agent-authored graph expansion → Rank → Results
 ```
 
-`kb search` stops after the vector search. `kb graph-search` additionally pulls in graph
-neighbours of the top hits and ranks them below the direct matches.
+`kb search` stops after vector search. `kb graph-search` additionally pulls in a bounded, diverse
+set of graph neighbours through agent-authored evidence only, ranked below direct matches.
 
 ## Embedding models
 
@@ -183,20 +177,29 @@ Lists indexed documents.
 
 ### `chimpiler kb entities`
 
-Lists extracted entity keys for graph retrieval and agent enrichment.
+Lists agent-registered entity keys for graph retrieval and enrichment.
 
 ```bash
 chimpiler kb entities
 ```
 
+### `chimpiler kb entity <key>`
+
+Registers an entity only when an agent has reviewed exact evidence in an indexed source.
+
+```bash
+chimpiler kb entity "concept:root-cause-culture" --kind concept --surface "root cause culture" \
+  --source ./root-cause.md --evidence "Root cause culture requires time to change the system."
+```
+
 ### `chimpiler kb relate <subject> <predicate> <object>`
 
-Adds a relationship that an agent has verified from evidence. The entity keys must be obtained from
-`kb entities`; provide the supporting text and an optional confidence score.
+Adds a relationship that an agent has verified from evidence. The entity keys must already be
+registered; provide the indexed source path, exact supporting text, and optional confidence score.
 
 ```bash
 chimpiler kb relate "person:bob tagart" authorized "organization:electronic arts" \
-  --evidence "Bob Tagart authorized Electronic Arts." --confidence 0.9
+  --source ./briefing.md --evidence "Bob Tagart authorized Electronic Arts." --confidence 0.9
 ```
 
 ### `chimpiler kb search <query>`
@@ -232,8 +235,8 @@ Manages the local ONNX model cache.
 
 Prints self-contained installation and operating guidance. Agent harnesses can inject the output
 into an agent's context before it calls the CLI. It explains acquiring Chimpiler with `dotnet tool
-install --global Chimpiler`, indexing, direct and graph retrieval, local model selection, and the
-evidence requirements for graph-expanded aliases and agent-added relationships.
+install --global Chimpiler`, indexing, direct and graph retrieval, local model selection,
+subagent delegation, and evidence requirements for agent-added relationships.
 
 ```bash
 chimpiler kb prompt

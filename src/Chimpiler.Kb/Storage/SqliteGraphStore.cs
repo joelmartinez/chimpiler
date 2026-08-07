@@ -140,9 +140,9 @@ public sealed class SqliteGraphStore : IGraphStore
             : null;
     }
 
-    public async Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default)
     {
-        if (nodeIds.Count == 0 || depth <= 0)
+        if (nodeIds.Count == 0 || depth <= 0 || edgeKinds.Count == 0)
         {
             return Array.Empty<long>();
         }
@@ -152,7 +152,7 @@ public sealed class SqliteGraphStore : IGraphStore
 
         for (var level = 0; level < depth && frontier.Count > 0; level++)
         {
-            var neighbours = await LoadNeighboursAsync(frontier, cancellationToken).ConfigureAwait(false);
+            var neighbours = await LoadNeighboursAsync(frontier, edgeKinds, cancellationToken).ConfigureAwait(false);
             var next = new List<long>();
             foreach (var neighbour in neighbours)
             {
@@ -179,20 +179,26 @@ public sealed class SqliteGraphStore : IGraphStore
     }
 
     /// <summary>Loads the direct neighbours of the given nodes in both edge directions.</summary>
-    private async Task<IReadOnlyList<long>> LoadNeighboursAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<long>> LoadNeighboursAsync(IReadOnlyCollection<long> nodeIds, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken)
     {
         var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
+        var kindParameterNames = edgeKinds.Select((_, index) => $"$kind{index}").ToArray();
         var placeholders = string.Join(", ", parameterNames);
         using var command = _database.CreateCommand($"""
-            SELECT TargetNodeId FROM Edges WHERE SourceNodeId IN ({placeholders})
+            SELECT TargetNodeId FROM Edges WHERE SourceNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)})
             UNION
-            SELECT SourceNodeId FROM Edges WHERE TargetNodeId IN ({placeholders});
+            SELECT SourceNodeId FROM Edges WHERE TargetNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)});
             """);
 
         var i = 0;
         foreach (var id in nodeIds)
         {
             command.Parameters.AddWithValue(parameterNames[i++], id);
+        }
+        i = 0;
+        foreach (var kind in edgeKinds)
+        {
+            command.Parameters.AddWithValue(kindParameterNames[i++], kind);
         }
 
         var neighbours = new List<long>();

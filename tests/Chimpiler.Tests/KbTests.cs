@@ -2,7 +2,6 @@ using Chimpiler.Kb;
 using Chimpiler.Kb.Abstractions;
 using Chimpiler.Kb.Chunking;
 using Chimpiler.Kb.Embeddings;
-using Chimpiler.Kb.EntityExtraction;
 using Chimpiler.Kb.Models;
 using Chimpiler.Kb.Storage;
 
@@ -247,23 +246,39 @@ public class KbTests : IDisposable
     }
 
     [Fact]
-    public async Task GraphSearch_PullsInRelatedChunks()
+    public async Task GraphSearch_TraversesOnlyAgentAuthoredEvidence()
     {
         using var database = CreateDatabase();
         var kb = CreateKnowledgeBase(database);
         await kb.InitializeAsync();
 
-        await kb.AddDocumentAsync(WriteFile("doc.md",
-            "# Storage\n\nsqlite stores vectors as blobs\n\n# Graph\n\nnodes and edges describe relationships\n"));
+        var primary = WriteFile("primary.md", "Atlas controls the solar array.");
+        var related = WriteFile("related.md", "Heliostat records identify the sunward hold setting.");
+        await kb.AddDocumentAsync(primary);
+        await kb.AddDocumentAsync(related);
+        await kb.RegisterEntityAsync(
+            new KbEntityMention("system", "Atlas", "system:atlas"),
+            "Atlas controls the solar array.",
+            primary);
+        await kb.RegisterEntityAsync(
+            new KbEntityMention("system", "Heliostat", "system:heliostat"),
+            "Heliostat records identify the sunward hold setting.",
+            related);
+        await kb.AddEntityRelationshipAsync(new KbEntityRelationship(
+            "system:atlas",
+            "uses",
+            "system:heliostat",
+            "Atlas controls the solar array.",
+            primary));
 
-        var plain = await kb.SearchAsync("sqlite blobs", topK: 1);
-        var graph = await kb.GraphSearchAsync("sqlite blobs", topK: 1, depth: 2);
+        var plain = await kb.SearchAsync("Atlas solar array", topK: 1);
+        var graph = await kb.GraphSearchAsync("Atlas solar array", topK: 1, depth: 4);
 
         Assert.Single(plain);
         Assert.True(graph.Count > plain.Count);
         Assert.Contains(graph, r => r.FromGraphExpansion);
-        // Graph neighbours must never outrank the direct vector hit.
         Assert.False(graph[0].FromGraphExpansion);
+        Assert.Contains(graph, result => result.SourcePath == Path.GetFullPath(related));
     }
 
     [Fact]
@@ -380,66 +395,15 @@ public class KbTests : IDisposable
     }
 
     [Fact]
-    public void EntityExtractor_RecognizesPeopleOrganizationsAndInitialisms()
-    {
-        var mentions = new RuleBasedEntityExtractor().Extract(
-            "Bob Tagart reviewed the contract for Electronic Arts (EA).");
-
-        Assert.Contains(mentions, mention => mention.Key == "person:bob tagart");
-        Assert.Contains(mentions, mention => mention.Key == "organization:electronic arts");
-        Assert.Contains(mentions, mention => mention.Key == "organization:ea");
-    }
-
-    [Fact]
-    public void EntityAliasResolver_FindsNicknameAndInitialismCandidates()
-    {
-        var bob = new KbEntityMention(NodeKinds.Person, "Bob Tagart", "person:bob tagart");
-        var electronicArts = new KbEntityMention(NodeKinds.Organization, "Electronic Arts", "organization:electronic arts");
-
-        Assert.Equal(0.8, EntityAliasResolver.GetCandidateConfidence(
-            bob,
-            new KbNode(1, NodeKinds.Entity, "person:robert tagart", null, null)));
-        Assert.Equal(0.75, EntityAliasResolver.GetCandidateConfidence(
-            electronicArts,
-            new KbNode(2, NodeKinds.Entity, "organization:ea", null, null)));
-    }
-
-    [Fact]
-    public void EntityRelationshipExtractor_ExtractsExplicitTwoEntityActions()
-    {
-        var entities = new RuleBasedEntityExtractor().Extract(
-            "Bob Tagart authorized Electronic Arts to distribute the release.");
-
-        var relationships = new RuleBasedEntityRelationshipExtractor().Extract(
-            "Bob Tagart authorized Electronic Arts to distribute the release.",
-            entities);
-
-        Assert.Contains(relationships, relationship =>
-            relationship.SubjectKey == "person:bob tagart" &&
-            relationship.Predicate == "authorized" &&
-            relationship.ObjectKey == "organization:electronic arts");
-    }
-
-    [Fact]
-    public async Task GraphSearch_UsesQueryEntityAliasesToTraverseRelationshipEvents()
+    public async Task Indexing_DoesNotAutomaticallyExtractEntitiesOrRelationships()
     {
         using var database = CreateDatabase();
         var kb = CreateKnowledgeBase(database);
         await kb.InitializeAsync();
 
-        await kb.AddDocumentAsync(WriteFile(
-            "authorization.md",
-            "Bob Tagart authorized Electronic Arts to distribute the velora ledger."));
-        var record = WriteFile(
-            "record.md",
-            "Electronic Arts maintains the `NorthstarReceipt` publisher record.");
-        await kb.AddDocumentAsync(record);
+        await kb.AddDocumentAsync(WriteFile("authorization.md", "Bob Tagart authorized Electronic Arts to distribute the velora ledger."));
 
-        var direct = await kb.SearchAsync("What did Robert Tagart authorize?", topK: 1);
-        var graph = await kb.GraphSearchAsync("What did Robert Tagart authorize?", topK: 1, depth: 3);
-
-        Assert.DoesNotContain(direct, result => result.SourcePath == Path.GetFullPath(record));
-        Assert.Contains(graph, result => result.SourcePath == Path.GetFullPath(record) && result.Text.Contains("NorthstarReceipt", StringComparison.Ordinal));
+        Assert.Empty(await kb.ListEntitiesAsync());
     }
 
     [Fact]
@@ -449,20 +413,24 @@ public class KbTests : IDisposable
         var kb = CreateKnowledgeBase(database);
         await kb.InitializeAsync();
 
-        await kb.AddDocumentAsync(WriteFile("bob.md", "Bob Tagart maintains the velora routing plan."));
+        var bob = WriteFile("bob.md", "Bob Tagart maintains the velora routing plan.");
         var record = WriteFile("publisher.md", "Electronic Arts maintains the `NorthstarReceipt` publisher record.");
+        await kb.AddDocumentAsync(bob);
         await kb.AddDocumentAsync(record);
+        await kb.RegisterEntityAsync(new KbEntityMention("person", "Bob Tagart", "person:bob tagart"), "Bob Tagart maintains the velora routing plan.", bob);
+        await kb.RegisterEntityAsync(new KbEntityMention("organization", "Electronic Arts", "organization:electronic arts"), "Electronic Arts maintains the `NorthstarReceipt` publisher record.", record);
 
         await kb.AddEntityRelationshipAsync(new KbEntityRelationship(
             "person:bob tagart",
             "authorized",
             "organization:electronic arts",
-            "Verified by the release authorization.",
+            "Bob Tagart maintains the velora routing plan.",
+            bob,
             0.9,
             "agent-asserted"));
 
         var entities = await kb.ListEntitiesAsync();
-        var graph = await kb.GraphSearchAsync("What did Bob Tagart authorize?", topK: 1, depth: 3);
+        var graph = await kb.GraphSearchAsync("What did Bob Tagart authorize?", topK: 1, depth: 4);
 
         Assert.Contains(entities, entity => entity.Key == "person:bob tagart");
         Assert.Contains(entities, entity => entity.Key == "organization:electronic arts");
