@@ -27,7 +27,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>chimpiler</ToolCommandName>
     <PackageId>Chimpiler</PackageId>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <Authors>Joel Martinez</Authors>
     <Description>Agent-ready local GraphRAG and .NET CLI tooling</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

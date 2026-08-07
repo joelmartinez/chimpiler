@@ -101,6 +101,64 @@ public sealed class SqliteGraphStore : IGraphStore
         return nodes;
     }
 
+    public async Task<IReadOnlyList<KbNode>> GetNodesAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken = default)
+    {
+        if (nodeIds.Count == 0)
+        {
+            return Array.Empty<KbNode>();
+        }
+
+        var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
+        using var command = _database.CreateCommand(
+            $"SELECT Id, Kind, Key, ChunkId, DocumentId FROM Nodes WHERE Id IN ({string.Join(", ", parameterNames)});");
+        var index = 0;
+        foreach (var id in nodeIds)
+        {
+            command.Parameters.AddWithValue(parameterNames[index++], id);
+        }
+
+        var nodes = new List<KbNode>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            nodes.Add(new KbNode(reader.GetInt64(0), reader.GetString(1), reader.GetString(2),
+                reader.IsDBNull(3) ? null : reader.GetInt64(3),
+                reader.IsDBNull(4) ? null : reader.GetInt64(4)));
+        }
+
+        return nodes;
+    }
+
+    public async Task<IReadOnlyList<KbEdge>> GetEdgesForNodesAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken = default)
+    {
+        if (nodeIds.Count == 0)
+        {
+            return Array.Empty<KbEdge>();
+        }
+
+        var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
+        var placeholders = string.Join(", ", parameterNames);
+        using var command = _database.CreateCommand($"""
+            SELECT Id, SourceNodeId, TargetNodeId, Kind, Weight
+            FROM Edges
+            WHERE SourceNodeId IN ({placeholders}) OR TargetNodeId IN ({placeholders});
+            """);
+        var index = 0;
+        foreach (var id in nodeIds)
+        {
+            command.Parameters.AddWithValue(parameterNames[index++], id);
+        }
+
+        var edges = new List<KbEdge>();
+        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            edges.Add(new KbEdge(reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetString(3), reader.GetDouble(4)));
+        }
+
+        return edges;
+    }
+
     public async Task<IReadOnlyList<KbNode>> GetNodesByKindAsync(string kind, CancellationToken cancellationToken = default)
     {
         using var command = _database.CreateCommand(
@@ -140,14 +198,15 @@ public sealed class SqliteGraphStore : IGraphStore
             : null;
     }
 
-    public async Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<GraphTraversal>> TraverseAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default)
     {
         if (nodeIds.Count == 0 || depth <= 0 || edgeKinds.Count == 0)
         {
-            return Array.Empty<long>();
+            return Array.Empty<GraphTraversal>();
         }
 
         var visited = new HashSet<long>(nodeIds);
+        var paths = nodeIds.ToDictionary(id => id, id => (IReadOnlyList<long>)new[] { id });
         var frontier = (IReadOnlyCollection<long>)nodeIds.Distinct().ToList();
 
         for (var level = 0; level < depth && frontier.Count > 0; level++)
@@ -156,9 +215,10 @@ public sealed class SqliteGraphStore : IGraphStore
             var next = new List<long>();
             foreach (var neighbour in neighbours)
             {
-                if (visited.Add(neighbour))
+                if (visited.Add(neighbour.NodeId))
                 {
-                    next.Add(neighbour);
+                    paths[neighbour.NodeId] = paths[neighbour.FromNodeId].Append(neighbour.NodeId).ToList();
+                    next.Add(neighbour.NodeId);
                 }
             }
 
@@ -166,7 +226,11 @@ public sealed class SqliteGraphStore : IGraphStore
         }
 
         var reached = visited.Except(nodeIds).ToList();
-        return await ResolveChunkIdsAsync(reached, cancellationToken).ConfigureAwait(false);
+        var nodes = await GetNodesAsync(reached, cancellationToken).ConfigureAwait(false);
+        return nodes
+            .Where(node => node.ChunkId is not null)
+            .Select(node => new GraphTraversal(node.ChunkId!.Value, paths[node.Id]))
+            .ToList();
     }
 
     public async Task ClearAsync(CancellationToken cancellationToken = default)
@@ -179,15 +243,15 @@ public sealed class SqliteGraphStore : IGraphStore
     }
 
     /// <summary>Loads the direct neighbours of the given nodes in both edge directions.</summary>
-    private async Task<IReadOnlyList<long>> LoadNeighboursAsync(IReadOnlyCollection<long> nodeIds, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<(long NodeId, long FromNodeId)>> LoadNeighboursAsync(IReadOnlyCollection<long> nodeIds, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken)
     {
         var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
         var kindParameterNames = edgeKinds.Select((_, index) => $"$kind{index}").ToArray();
         var placeholders = string.Join(", ", parameterNames);
         using var command = _database.CreateCommand($"""
-            SELECT TargetNodeId FROM Edges WHERE SourceNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)})
+            SELECT TargetNodeId, SourceNodeId FROM Edges WHERE SourceNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)})
             UNION
-            SELECT SourceNodeId FROM Edges WHERE TargetNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)});
+            SELECT SourceNodeId, TargetNodeId FROM Edges WHERE TargetNodeId IN ({placeholders}) AND Kind IN ({string.Join(", ", kindParameterNames)});
             """);
 
         var i = 0;
@@ -201,40 +265,14 @@ public sealed class SqliteGraphStore : IGraphStore
             command.Parameters.AddWithValue(kindParameterNames[i++], kind);
         }
 
-        var neighbours = new List<long>();
+        var neighbours = new List<(long NodeId, long FromNodeId)>();
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            neighbours.Add(reader.GetInt64(0));
+            neighbours.Add((reader.GetInt64(0), reader.GetInt64(1)));
         }
 
         return neighbours;
     }
 
-    private async Task<IReadOnlyList<long>> ResolveChunkIdsAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken)
-    {
-        if (nodeIds.Count == 0)
-        {
-            return Array.Empty<long>();
-        }
-
-        var parameterNames = nodeIds.Select((_, index) => $"$id{index}").ToArray();
-        using var command = _database.CreateCommand(
-            $"SELECT DISTINCT ChunkId FROM Nodes WHERE ChunkId IS NOT NULL AND Id IN ({string.Join(", ", parameterNames)});");
-
-        var i = 0;
-        foreach (var id in nodeIds)
-        {
-            command.Parameters.AddWithValue(parameterNames[i++], id);
-        }
-
-        var chunkIds = new List<long>();
-        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            chunkIds.Add(reader.GetInt64(0));
-        }
-
-        return chunkIds;
-    }
 }

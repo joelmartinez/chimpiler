@@ -40,7 +40,7 @@ public sealed class KbCliIntegrationTests : IDisposable
         Assert.Contains("graph-search", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("does not infer entities", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("subagent", prompt.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("Verify their cited source text", prompt.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Verify the cited source text and trail", prompt.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("dotnet tool install --global Chimpiler", prompt.StandardOutput, StringComparison.Ordinal);
     }
 
@@ -69,7 +69,7 @@ public sealed class KbCliIntegrationTests : IDisposable
             "Which setting controls the Atlas array sunward hold mode?", "--top", "1");
         var graphSearch = await RunCliAsync(
             "kb", "--db", database, "--model", "default", "graph-search",
-            "Which setting controls the Atlas array sunward hold mode?", "--top", "3", "--depth", "7");
+            "Which setting controls the Atlas array sunward hold mode?", "--top", "3", "--depth", "2");
 
         Assert.Contains("atlas.md", vectorSearch.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("configuration.md", vectorSearch.StandardOutput, StringComparison.Ordinal);
@@ -106,6 +106,7 @@ public sealed class KbCliIntegrationTests : IDisposable
         Assert.DoesNotContain("robert.md", bobVectorSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("robert.md", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("crimsonLedger", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("trail: person:bob tagart \u2192 alias-candidate \u2192 person:robert tagart", bobGraphSearch.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -63,6 +63,9 @@ public sealed record KbEntity(string Key, string Kind, string Surface);
 /// <summary>An edge in the knowledge graph.</summary>
 public sealed record KbEdge(long Id, long SourceNodeId, long TargetNodeId, string Kind, double Weight);
 
+/// <summary>A bounded traversal from a vector seed to a graph-reached chunk.</summary>
+public sealed record GraphTraversal(long ChunkId, IReadOnlyList<long> NodeIds);
+
 /// <summary>A single search hit.</summary>
 public sealed record SearchResult
 {
@@ -74,6 +77,8 @@ public sealed record SearchResult
     public required double Score { get; init; }
     /// <summary>True when the hit was pulled in by graph expansion rather than vector similarity.</summary>
     public bool FromGraphExpansion { get; init; }
+    /// <summary>Agent-authored entity and relationship path that reached a graph-expanded result.</summary>
+    public string? GraphTrail { get; init; }
 }
 
 /// <summary>Options controlling how documents are split into chunks.</summary>

@@ -16,8 +16,9 @@ time it runs and is intentionally not part of the default test command.
 
 It includes a three-document chain (`Atlas sunward hold` → `heliostat bearing offset` →
 `sunTargetBias`) where the test agent registers source-backed entities and relationships. It
-verifies that a single-result vector search finds the direct source, while bounded graph traversal
-reaches the configuration source only through those agent-authored facts.
+verifies that a single-result vector search finds the direct source, while two relationship hops
+reach the configuration source only through those agent-authored facts. It asserts the displayed
+entity/predicate traversal trail as well as the cited result.
 
 It also includes disconnected personal-name fixtures. A direct vector query finds the Bob Tagart
 document, while graph expansion reaches the Robert Tagart document only through an

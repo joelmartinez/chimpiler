@@ -117,7 +117,7 @@ public sealed class KnowledgeBase : IKnowledgeBase
             .ConfigureAwait(false);
         await _graphStore.SetNodeMetadataAsync(entityNodeId, "entity.kind", entity.Kind, cancellationToken).ConfigureAwait(false);
         await _graphStore.SetNodeMetadataAsync(entityNodeId, "entity.surface", entity.Surface, cancellationToken).ConfigureAwait(false);
-        await _graphStore.AddEdgeAsync(sourceChunkNode.Id, entityNodeId, EdgeKinds.Mentions, 1.0, cancellationToken).ConfigureAwait(false);
+        await _graphStore.AddEdgeAsync(sourceChunkNode.Node.Id, entityNodeId, EdgeKinds.Mentions, 1.0, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string query, int topK = 5, CancellationToken cancellationToken = default)
@@ -126,7 +126,7 @@ public sealed class KnowledgeBase : IKnowledgeBase
         return await _vectorStore.SearchAsync(embeddings[0], _embeddingProvider.Name, topK, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<SearchResult>> GraphSearchAsync(string query, int topK = 5, int depth = 1, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SearchResult>> GraphSearchAsync(string query, int topK = 5, int depth = 2, CancellationToken cancellationToken = default)
     {
         var seeds = await SearchAsync(query, topK, cancellationToken).ConfigureAwait(false);
         var seedChunkIds = seeds.Select(s => s.ChunkId).ToList();
@@ -137,13 +137,23 @@ public sealed class KnowledgeBase : IKnowledgeBase
             return seeds;
         }
 
-        var expandedChunkIds = (await _graphStore
-                .ExpandAsync(traversalSeedNodeIds, depth, AgentTraversalEdgeKinds, cancellationToken)
+        if (depth <= 0)
+        {
+            return seeds;
+        }
+
+        // Each relationship consumes entity → event → entity edges; account for the seed mention
+        // and the evidence mention that returns from the final entity to a source chunk.
+        var nodeDepth = (depth * 3) + 1;
+        var traversals = (await _graphStore
+                .TraverseAsync(traversalSeedNodeIds, nodeDepth, AgentTraversalEdgeKinds, cancellationToken)
                 .ConfigureAwait(false))
-            .Except(seedChunkIds)
+            .Where(traversal => !seedChunkIds.Contains(traversal.ChunkId))
             .ToList();
 
-        var neighbours = (await _vectorStore.GetChunksAsync(expandedChunkIds, cancellationToken).ConfigureAwait(false))
+        var trails = await DescribeTrailsAsync(traversals, cancellationToken).ConfigureAwait(false);
+        var neighbours = (await _vectorStore.GetChunksAsync(traversals.Select(traversal => traversal.ChunkId).ToList(), cancellationToken).ConfigureAwait(false))
+            .Select(result => result with { GraphTrail = trails.GetValueOrDefault(result.ChunkId) })
             .GroupBy(result => result.DocumentId)
             .Select(group => group.OrderBy(result => result.ChunkId).First())
             .Take(topK)
@@ -171,8 +181,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
 
         var subject = await RequireEntityAsync(relationship.SubjectKey, cancellationToken).ConfigureAwait(false);
         var target = await RequireEntityAsync(relationship.ObjectKey, cancellationToken).ConfigureAwait(false);
-        var sourceChunkNode = await FindEvidenceChunkNodeAsync(relationship.SourcePath, relationship.Evidence, cancellationToken).ConfigureAwait(false);
-        await AddRelationshipEventAsync(subject.Id, target.Id, relationship, sourceChunkNode.Id, cancellationToken).ConfigureAwait(false);
+        var evidence = await FindEvidenceChunkNodeAsync(relationship.SourcePath, relationship.Evidence, cancellationToken).ConfigureAwait(false);
+        await AddRelationshipEventAsync(subject.Id, target.Id, relationship with { Evidence = evidence.CanonicalEvidence }, evidence.Node.Id, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> RebuildAsync(ChunkingOptions? options = null, CancellationToken cancellationToken = default)
@@ -285,6 +295,8 @@ public sealed class KnowledgeBase : IKnowledgeBase
         await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.predicate", relationship.Predicate, cancellationToken).ConfigureAwait(false);
         await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.evidence", relationship.Evidence, cancellationToken).ConfigureAwait(false);
         await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.provenance", relationship.Provenance, cancellationToken).ConfigureAwait(false);
+        await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.subject", relationship.SubjectKey, cancellationToken).ConfigureAwait(false);
+        await _graphStore.SetNodeMetadataAsync(eventNodeId, "event.object", relationship.ObjectKey, cancellationToken).ConfigureAwait(false);
         await _graphStore.AddEdgeAsync(subjectNodeId, eventNodeId, EdgeKinds.Subject, relationship.Confidence, cancellationToken).ConfigureAwait(false);
         await _graphStore.AddEdgeAsync(eventNodeId, objectNodeId, EdgeKinds.Object, relationship.Confidence, cancellationToken).ConfigureAwait(false);
         if (chunkNodeId is { } sourceChunkNodeId)
@@ -301,7 +313,115 @@ public sealed class KnowledgeBase : IKnowledgeBase
         await _graphStore.GetNodeAsync(NodeKinds.Entity, key, cancellationToken).ConfigureAwait(false)
         ?? throw new InvalidOperationException($"Entity '{key}' is not indexed. Run 'chimpiler kb entities' to list available entity keys.");
 
-    private async Task<KbNode> FindEvidenceChunkNodeAsync(string sourcePath, string evidence, CancellationToken cancellationToken)
+    private async Task<IReadOnlyDictionary<long, string>> DescribeTrailsAsync(
+        IReadOnlyList<GraphTraversal> traversals,
+        CancellationToken cancellationToken)
+    {
+        var nodeIds = traversals.SelectMany(traversal => traversal.NodeIds).Distinct().ToList();
+        var nodes = (await _graphStore.GetNodesAsync(nodeIds, cancellationToken).ConfigureAwait(false))
+            .ToDictionary(node => node.Id);
+        var eventIds = nodes.Values.Where(node => node.Kind == NodeKinds.Event).Select(node => node.Id).ToList();
+        var eventEdges = await _graphStore.GetEdgesForNodesAsync(eventIds, cancellationToken).ConfigureAwait(false);
+        var edgeNodeIds = eventEdges.SelectMany(edge => new[] { edge.SourceNodeId, edge.TargetNodeId }).Distinct().Except(nodes.Keys).ToList();
+        foreach (var node in await _graphStore.GetNodesAsync(edgeNodeIds, cancellationToken).ConfigureAwait(false))
+        {
+            nodes[node.Id] = node;
+        }
+        var eventDetails = new Dictionary<long, (string Subject, string Predicate, string Object)>();
+        foreach (var eventId in eventIds)
+        {
+            var metadata = await _graphStore.GetNodeMetadataAsync(eventId, cancellationToken).ConfigureAwait(false);
+            var subject = metadata.GetValueOrDefault("event.subject");
+            var target = metadata.GetValueOrDefault("event.object");
+            if (subject is null || target is null)
+            {
+                subject = eventEdges
+                    .Where(edge => edge.TargetNodeId == eventId && edge.Kind == EdgeKinds.Subject)
+                    .Select(edge => nodes.GetValueOrDefault(edge.SourceNodeId)?.Key)
+                    .FirstOrDefault(key => key is not null) ?? "unknown";
+                target = eventEdges
+                    .Where(edge => edge.SourceNodeId == eventId && edge.Kind == EdgeKinds.Object)
+                    .Select(edge => nodes.GetValueOrDefault(edge.TargetNodeId)?.Key)
+                    .FirstOrDefault(key => key is not null) ?? "unknown";
+            }
+            eventDetails[eventId] = (
+                subject,
+                metadata.GetValueOrDefault("event.predicate", "related-to"),
+                target);
+        }
+
+        return traversals
+            .GroupBy(traversal => traversal.ChunkId)
+            .ToDictionary(
+                group => group.Key,
+                group => DescribeTrail(group.OrderBy(traversal => traversal.NodeIds.Count).First().NodeIds, nodes, eventDetails));
+    }
+
+    private static string DescribeTrail(
+        IReadOnlyList<long> nodeIds,
+        IReadOnlyDictionary<long, KbNode> nodes,
+        IReadOnlyDictionary<long, (string Subject, string Predicate, string Object)> eventDetails)
+    {
+        var trail = new System.Text.StringBuilder();
+        var lastEntity = (string?)null;
+        var nextConnector = " \u2192 ";
+        foreach (var nodeId in nodeIds)
+        {
+            if (!nodes.TryGetValue(nodeId, out var node))
+            {
+                continue;
+            }
+
+            if (node.Kind == NodeKinds.Entity)
+            {
+                if (!string.Equals(lastEntity, node.Key, StringComparison.Ordinal))
+                {
+                    if (trail.Length > 0)
+                    {
+                        trail.Append(nextConnector);
+                    }
+
+                    trail.Append(node.Key);
+                    lastEntity = node.Key;
+                }
+
+                nextConnector = " \u2192 ";
+            }
+            else if (node.Kind == NodeKinds.Event && eventDetails.TryGetValue(node.Id, out var relationship))
+            {
+                if (trail.Length == 0 || string.Equals(lastEntity, relationship.Subject, StringComparison.Ordinal))
+                {
+                    if (trail.Length == 0)
+                    {
+                        trail.Append(relationship.Subject);
+                    }
+
+                    trail.Append(" \u2192 ").Append(relationship.Predicate);
+                    trail.Append(" \u2192 ").Append(relationship.Object);
+                    lastEntity = relationship.Object;
+                }
+                else if (string.Equals(lastEntity, relationship.Object, StringComparison.Ordinal))
+                {
+                    trail.Append(" \u2190 ").Append(relationship.Predicate);
+                    trail.Append(" \u2190 ").Append(relationship.Subject);
+                    lastEntity = relationship.Subject;
+                }
+                else
+                {
+                    trail.Append(" \u2192 ").Append(relationship.Subject);
+                    trail.Append(" \u2192 ").Append(relationship.Predicate);
+                    trail.Append(" \u2192 ").Append(relationship.Object);
+                    lastEntity = relationship.Object;
+                }
+
+                nextConnector = " \u2192 ";
+            }
+        }
+
+        return trail.Length == 0 ? "agent-authored evidence path" : trail.ToString();
+    }
+
+    private async Task<EvidenceMatch> FindEvidenceChunkNodeAsync(string sourcePath, string evidence, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(evidence);
@@ -310,19 +430,60 @@ public sealed class KnowledgeBase : IKnowledgeBase
         var document = await _vectorStore.GetDocumentAsync(fullPath, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Source '{fullPath}' is not indexed. Index it before adding graph evidence.");
         var chunks = await _vectorStore.GetChunksForDocumentAsync(document.Id, cancellationToken).ConfigureAwait(false);
-        var evidenceChunk = chunks.FirstOrDefault(chunk =>
-            chunk.Text.Contains(evidence, StringComparison.OrdinalIgnoreCase));
+        var evidenceChunk = chunks
+            .Select(chunk => new { Chunk = chunk, Match = FindEvidenceMatch(chunk.Text, evidence) })
+            .FirstOrDefault(candidate => candidate.Match is not null);
         if (evidenceChunk is null)
         {
-            throw new InvalidOperationException($"The supplied evidence was not found in indexed source '{fullPath}'.");
+            var excerpts = string.Join(Environment.NewLine, chunks.Take(3).Select(chunk => $"- {Excerpt(chunk.Text)}"));
+            throw new InvalidOperationException(
+                $"The supplied evidence was not found in indexed source '{fullPath}'. Try an exact source span or normalized Markdown text. Candidate excerpts:{Environment.NewLine}{excerpts}");
         }
 
         var node = (await _graphStore
-                .GetNodesForChunksAsync(new[] { evidenceChunk.Id }, cancellationToken)
+                .GetNodesForChunksAsync(new[] { evidenceChunk.Chunk.Id }, cancellationToken)
                 .ConfigureAwait(false))
             .SingleOrDefault(candidate => candidate.Kind == NodeKinds.Chunk);
-        return node ?? throw new InvalidOperationException($"No graph node exists for evidence chunk {evidenceChunk.Id}.");
+        return new EvidenceMatch(
+            node ?? throw new InvalidOperationException($"No graph node exists for evidence chunk {evidenceChunk.Chunk.Id}."),
+            evidenceChunk.Match!);
     }
+
+    private static string? FindEvidenceMatch(string source, string evidence)
+    {
+        var exactIndex = source.IndexOf(evidence, StringComparison.OrdinalIgnoreCase);
+        if (exactIndex >= 0)
+        {
+            return source.Substring(exactIndex, evidence.Length);
+        }
+
+        var normalizedEvidence = NormalizeMarkdown(evidence);
+        foreach (var paragraph in source.Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (NormalizeMarkdown(paragraph).Contains(normalizedEvidence, StringComparison.OrdinalIgnoreCase))
+            {
+                return paragraph.Trim();
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeMarkdown(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(
+                System.Text.RegularExpressions.Regex.Replace(text, @"\[([^\]]+)\]\([^)]+\)", "$1"),
+                @"[`*_#]",
+                string.Empty)
+            .ReplaceLineEndings(" ")
+            .Trim();
+
+    private static string Excerpt(string text)
+    {
+        var singleLine = text.ReplaceLineEndings(" ").Trim();
+        return singleLine.Length <= 180 ? singleLine : singleLine[..180] + "\u2026";
+    }
+
+    private sealed record EvidenceMatch(KbNode Node, string CanonicalEvidence);
 
     private static string ComputeHash(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

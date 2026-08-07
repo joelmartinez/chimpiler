@@ -84,9 +84,9 @@ chimpiler kb prompt
 
 Follow that output. Use `chimpiler kb search` for direct evidence. Delegate distinct source themes
 to subagents when useful, returning only cited entity/relationship candidates to the orchestrator.
-Register only verified entities and relationships, then use `chimpiler kb graph-search --depth 3`
-to follow those focused evidence links. Cite returned source paths and treat `(graph)` results as
-leads to verify.
+Register only verified entities and relationships, then use `chimpiler kb graph-search --depth 2`
+to follow those focused evidence links. Depth is relationship hops; inspect each returned `trail:`
+and cited source before treating a `(graph)` result as evidence.
 ```
 
 ## Installation

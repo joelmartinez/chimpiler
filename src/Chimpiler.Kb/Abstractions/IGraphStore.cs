@@ -14,13 +14,15 @@ public interface IGraphStore
     Task<IReadOnlyDictionary<string, string>> GetNodeMetadataAsync(long nodeId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<KbNode>> GetNodesForChunksAsync(IReadOnlyCollection<long> chunkIds, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KbNode>> GetNodesAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KbEdge>> GetEdgesForNodesAsync(IReadOnlyCollection<long> nodeIds, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<KbNode>> GetNodesByKindAsync(string kind, CancellationToken cancellationToken = default);
 
     Task<KbNode?> GetNodeAsync(string kind, string key, CancellationToken cancellationToken = default);
 
-    /// <summary>Expands outward through the allowed edge kinds up to <paramref name="depth"/> hops.</summary>
-    Task<IReadOnlyList<long>> ExpandAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default);
+    /// <summary>Expands outward through allowed edges, retaining a path for every reached chunk.</summary>
+    Task<IReadOnlyList<GraphTraversal>> TraverseAsync(IReadOnlyCollection<long> nodeIds, int depth, IReadOnlyCollection<string> edgeKinds, CancellationToken cancellationToken = default);
 
     Task ClearAsync(CancellationToken cancellationToken = default);
 }

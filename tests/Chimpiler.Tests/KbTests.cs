@@ -272,13 +272,14 @@ public class KbTests : IDisposable
             primary));
 
         var plain = await kb.SearchAsync("Atlas solar array", topK: 1);
-        var graph = await kb.GraphSearchAsync("Atlas solar array", topK: 1, depth: 4);
+        var graph = await kb.GraphSearchAsync("Atlas solar array", topK: 1, depth: 1);
 
         Assert.Single(plain);
         Assert.True(graph.Count > plain.Count);
         Assert.Contains(graph, r => r.FromGraphExpansion);
         Assert.False(graph[0].FromGraphExpansion);
-        Assert.Contains(graph, result => result.SourcePath == Path.GetFullPath(related));
+        var graphHit = Assert.Single(graph, result => result.SourcePath == Path.GetFullPath(related));
+        Assert.Equal("system:atlas \u2192 uses \u2192 system:heliostat", graphHit.GraphTrail);
     }
 
     [Fact]
@@ -404,6 +405,24 @@ public class KbTests : IDisposable
         await kb.AddDocumentAsync(WriteFile("authorization.md", "Bob Tagart authorized Electronic Arts to distribute the velora ledger."));
 
         Assert.Empty(await kb.ListEntitiesAsync());
+    }
+
+    [Fact]
+    public async Task RegisterEntity_AcceptsNormalizedMarkdownEvidenceAndStoresCanonicalSourceText()
+    {
+        using var database = CreateDatabase();
+        var kb = CreateKnowledgeBase(database);
+        await kb.InitializeAsync();
+
+        var source = WriteFile("source.md", "The [delivery team](https://example.test/team) prevents burnout.");
+        await kb.AddDocumentAsync(source);
+
+        await kb.RegisterEntityAsync(
+            new KbEntityMention("concept", "delivery team", "concept:delivery-team"),
+            "The delivery team prevents burnout.",
+            source);
+
+        Assert.Contains(await kb.ListEntitiesAsync(), entity => entity.Key == "concept:delivery-team");
     }
 
     [Fact]

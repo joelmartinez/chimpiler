@@ -167,7 +167,7 @@ internal static class KbCommandFactory
 
         var queryArg = new Argument<string>("query", "Query text");
         var topOption = new Option<int>(name: "--top", description: "Number of results", getDefaultValue: () => 5);
-        var depthOption = new Option<int>(name: "--depth", description: "Graph expansion depth", getDefaultValue: () => 1);
+        var depthOption = new Option<int>(name: "--depth", description: "Maximum agent-authored relationship hops to traverse", getDefaultValue: () => 2);
 
         command.AddArgument(queryArg);
         command.AddOption(topOption);
@@ -207,6 +207,10 @@ internal static class KbCommandFactory
                     }
 
                     Console.WriteLine($"  {Preview(result.Text)}");
+                    if (!string.IsNullOrWhiteSpace(result.GraphTrail))
+                    {
+                        Console.WriteLine($"  trail: {result.GraphTrail}");
+                    }
                     Console.WriteLine();
                 }
             });
@@ -409,12 +413,12 @@ internal static class KbCommandFactory
             Retrieval:
             - Use `chimpiler kb search "<question>" --top 5` for direct semantic retrieval.
             - Read the cited source chunks before making connections. For broad questions, delegate one focused source/theme to each subagent, then return only evidence, entity candidates, and relationships to the orchestrator.
-            - Use `chimpiler kb graph-search "<question>" --top 3 --depth 3` only after you have added relevant evidence-backed graph facts. It traverses agent-authored evidence edges, not document structure.
-            - Results marked `(graph)` are leads reached through agent-authored relationships. Verify their cited source text before making a claim.
+            - Use `chimpiler kb graph-search "<question>" --top 3 --depth 2` only after you have added relevant evidence-backed graph facts. Depth means relationship hops: one hop reaches one connected source; two hops bridges a shared concept. It traverses agent-authored evidence edges, not document structure.
+            - Results marked `(graph)` include a `trail:` of entities and predicates. Verify the cited source text and trail before making a claim.
 
             Entity graph:
             - KB indexes chunks and local embeddings; it does not infer entities, aliases, or relationships from prose. Use your reasoning over cited chunks to decide what is worth adding.
-            - Register every entity with exact source evidence: `chimpiler kb entity <key> --kind <type> --surface "<exact text>" --source <path> --evidence "<quoted source>"`.
+            - Register every entity with exact source evidence: `chimpiler kb entity <key> --kind <type> --surface "<exact text>" --source <path> --evidence "<quoted source>"`. Evidence may omit Markdown link URLs; KB stores the matching canonical source excerpt and prints candidate excerpts if it cannot match.
             - Model ambiguous aliases explicitly as evidence-backed relationships instead of assuming identity.
             - Use `chimpiler kb entities` to inspect registered keys. Add verified relationships with `chimpiler kb relate <subject-key> <predicate> <object-key> --source <path> --evidence "<quoted source>"`.
             - Do not add speculative or uncited facts. The graph is an agent-maintained evidence index, not an automatic truth extractor.

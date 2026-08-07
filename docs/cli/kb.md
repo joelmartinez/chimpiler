@@ -86,7 +86,8 @@ An agent can register an entity tied to exact text in an indexed source, then ad
 evidence-backed relationship between registered entities. `graph-search` starts from vector hits
 and traverses only those agent-authored mention, evidence, subject, and object edges. It never
 walks document containment, heading, or sibling-chunk edges, and returns at most one expanded chunk
-per document (up to the requested direct-result count).
+per document (up to the requested direct-result count). Each graph result prints its entity and
+predicate trail plus the cited source chunk.
 
 An agent harness should first retrieve and read sources. It can parallelize that work by assigning
 separate source themes to subagents; subagents should return only cited evidence and proposed
@@ -103,6 +104,9 @@ chimpiler kb relate "person:bob-tagart" authorized "organization:electronic-arts
 
 Use stable keys and inspect them with `kb entities`. An alias is just another evidence-backed
 relationship (for example, `alias-candidate`); never treat it as proof without source review.
+Evidence accepts an exact source span or a normalized Markdown equivalent (for example, link text
+without its URL). The database stores the matching canonical source excerpt; a failed registration
+prints excerpts from the indexed source to help the agent correct its citation.
 
 ## Search pipeline
 
@@ -111,7 +115,15 @@ Query → Embedding → Vector search → Top K chunks → Agent-authored graph 
 ```
 
 `kb search` stops after vector search. `kb graph-search` additionally pulls in a bounded, diverse
-set of graph neighbours through agent-authored evidence only, ranked below direct matches.
+set of graph neighbours through agent-authored evidence only, ranked below direct matches. Its
+`--depth` is **relationship hops**, not raw graph edges: one hop follows one relationship to a
+connected source; two hops follows a shared intermediate concept. The default is two hops.
+
+This is local GraphRAG: it answers source-specific and multi-hop questions with a compact,
+auditable evidence path. Corpus-wide thematic synthesis and community summaries remain harness
+responsibilities: delegate focused source review to subagents, then have the orchestrating agent
+combine only their cited findings. This preserves the local/offline index while applying LLM
+judgment where graph construction or global synthesis needs it.
 
 ## Embedding models
 
@@ -215,7 +227,13 @@ chimpiler kb search "how are dacpacs generated" --top 10
 Vector search plus graph expansion.
 
 ```bash
-chimpiler kb graph-search "identity columns" --top 5 --depth 2
+chimpiler kb graph-search "how does requirements churn lead to burnout?" --top 3 --depth 2
+```
+
+Graph-expanded results include a path such as:
+
+```text
+trail: concept:requirements-churn → contributes-to → concept:burnout
 ```
 
 ### `chimpiler kb rebuild`
