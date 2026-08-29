@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Reflection;
 using Chimpiler.Core;
 using Chimpiler.Core.Clawcker;
+using Chimpiler.Dacpac;
 
 namespace Chimpiler;
 
@@ -28,6 +29,8 @@ class Program
         // Create the ef-migrate command
         var efMigrateCommand = CreateEfMigrateCommand();
         rootCommand.AddCommand(efMigrateCommand);
+
+        rootCommand.AddCommand(DacpacCommandFactory.Create());
 
         // Create the clawcker command
         var clawckerCommand = CreateClawckerCommand();
@@ -80,6 +83,7 @@ class Program
         Console.WriteLine("  chimpiler [command] [options]");
         Console.WriteLine();
         Console.WriteLine("Available Commands:");
+        Console.WriteLine("  dacpac        Apply a supported DACPAC schema subset to PostgreSQL");
         Console.WriteLine("  ef-migrate    Generate DACPACs from EF Core DbContext models");
         Console.WriteLine("  clawcker      Manage local OpenClaw instances using Docker");
         Console.WriteLine("  kb            Agent-ready local GraphRAG knowledge base backed by SQLite");
@@ -95,7 +99,12 @@ class Program
 
     static void ShowSubcommandHelp(string subcommand)
     {
-        if (subcommand.Equals("ef-migrate", StringComparison.OrdinalIgnoreCase))
+        if (subcommand.Equals("dacpac", StringComparison.OrdinalIgnoreCase))
+        {
+            var helpText = LoadEmbeddedMarkdown("dacpac.md");
+            Console.WriteLine(helpText);
+        }
+        else if (subcommand.Equals("ef-migrate", StringComparison.OrdinalIgnoreCase))
         {
             var helpText = LoadEmbeddedMarkdown("ef-migrate.md");
             Console.WriteLine(helpText);

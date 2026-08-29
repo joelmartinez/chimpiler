@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Chimpiler.Core/Chimpiler.Core.csproj" />
+    <Project Path="src/Chimpiler.Dacpac/Chimpiler.Dacpac.csproj" />
     <Project Path="src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj" />
     <Project Path="src/Chimpiler.Kb/Chimpiler.Kb.csproj" />
     <Project Path="src/Chimpiler/Chimpiler.csproj" />

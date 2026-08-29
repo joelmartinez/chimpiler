@@ -46,6 +46,30 @@ The `ef-migrate` command generates one or more DACPAC files from EF Core DbConte
 
 [Learn more about ef-migrate →](docs/cli/ef-migrate.md)
 
+### `chimpiler dacpac apply` — DACPAC → PostgreSQL Schema Deployment
+
+The `dacpac apply` command reads SQL Server Database Project DACPACs through public DacFx APIs and
+translates a deliberately limited, validated subset into PostgreSQL DDL.
+
+```bash
+export CHIMPILER_DACPAC_CONNECTION_STRING='Host=localhost;Database=app;Username=app;Password=...'
+chimpiler dacpac apply ./Database.dacpac --dry-run
+chimpiler dacpac apply ./Database.dacpac
+```
+
+**Safety and deployment behavior:**
+- ✅ Deterministic state-based planning with no rename inference
+- ✅ PostgreSQL catalog introspection, transaction rollback, and advisory locking
+- ✅ Dry-run and reviewable script output
+- ✅ Destructive operations blocked unless `--allow-destructive` is supplied
+- ✅ Unsupported objects, expressions, and DACPAC deployment scripts rejected before connecting
+- ✅ Provider-neutral library boundary for future MySQL support
+
+This is not SqlPackage for PostgreSQL. Chimpiler independently implements the PostgreSQL planner
+and executor and uses DacFx only to read the package model through public APIs.
+
+[Learn more about dacpac apply →](docs/cli/dacpac.md)
+
 ### `chimpiler kb` — Local GraphRAG Knowledge Base
 
 The `kb` command builds and queries a completely local, zero-cloud, zero-Python knowledge base
@@ -136,6 +160,21 @@ Generate DACPACs for all DbContexts in an assembly:
 chimpiler ef-migrate --assembly path/to/YourApp.dll
 ```
 
+Preview applying a DACPAC to PostgreSQL:
+
+```bash
+chimpiler dacpac apply path/to/Database.dacpac \
+  --provider postgresql \
+  --connection-string "$CHIMPILER_DACPAC_CONNECTION_STRING" \
+  --dry-run
+```
+
+Write a reviewable script without changing the target:
+
+```bash
+chimpiler dacpac apply path/to/Database.dacpac --script ./deployment.sql
+```
+
 This will discover all DbContext types in the assembly and generate a DACPAC for each in the `./output` directory.
 
 ### Specify a Single DbContext
@@ -159,6 +198,21 @@ chimpiler ef-migrate --assembly path/to/YourApp.dll --verbose
 ```
 
 ## Command Reference
+
+### `dacpac apply`
+
+Apply a supported DACPAC schema subset to PostgreSQL.
+
+| Option | Required | Description | Default |
+|--------|----------|-------------|---------|
+| `<dacpac>` | ✅ | Path to the DACPAC | - |
+| `--provider` | ❌ | Target provider (`postgresql`; MySQL reserved for future support) | `postgresql` |
+| `--connection-string` | ✅* | Target connection string | `CHIMPILER_DACPAC_CONNECTION_STRING` |
+| `--dry-run` | ❌ | Print the plan and roll back | `false` |
+| `--script <path>` | ❌ | Write the plan and roll back | - |
+| `--allow-destructive` | ❌ | Permit reviewed destructive operations | `false` |
+
+\* Required through either the option or environment variable.
 
 ### `ef-migrate`
 

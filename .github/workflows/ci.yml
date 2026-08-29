@@ -42,6 +42,9 @@ jobs:
     
     - name: Build Chimpiler.Core
       run: dotnet build src/Chimpiler.Core/Chimpiler.Core.csproj --no-restore --configuration Release
+
+    - name: Build Chimpiler.Dacpac
+      run: dotnet build src/Chimpiler.Dacpac/Chimpiler.Dacpac.csproj --no-restore --configuration Release
     
     - name: Build Chimpiler.TestFixtures
       run: dotnet build tests/Chimpiler.TestFixtures/Chimpiler.TestFixtures.csproj --no-restore --configuration Release
@@ -51,6 +54,9 @@ jobs:
     
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
+
+    - name: Build DACPAC fixture
+      run: dotnet build tests/fixtures/dacpac/Chimpiler.Dacpac.Fixture/Chimpiler.Dacpac.Fixture.sqlproj --configuration Release
     
     - name: Pack Chimpiler CLI tool
       run: dotnet pack src/Chimpiler/Chimpiler.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.cli_full_version }}
@@ -61,6 +67,8 @@ jobs:
         set -euo pipefail
         dotnet tool install --tool-path ./tool-smoke --add-source ./artifacts Chimpiler --version "${{ steps.version.outputs.cli_full_version }}"
         ./tool-smoke/chimpiler kb --help
+        ./tool-smoke/chimpiler dacpac --help
+        ./tool-smoke/chimpiler dacpac apply --help
 
     - name: Pack Chimpiler.EfMigrate library
       run: dotnet pack src/Chimpiler.EfMigrate/Chimpiler.EfMigrate.csproj --no-build --configuration Release --output ./artifacts /p:Version=${{ steps.version.outputs.lib_full_version }}
@@ -71,10 +79,27 @@ jobs:
         name: nuget-package
         path: ./artifacts/*.nupkg
 
+  dacpac-integration:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Run PostgreSQL DACPAC integration tests
+      run: dotnet test tests/Chimpiler.Dacpac.IntegrationTests/Chimpiler.Dacpac.IntegrationTests.csproj --configuration Release --verbosity normal
+
   publish:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: [build-and-test, dacpac-integration]
     permissions:
       contents: read
       id-token: write
@@ -107,6 +132,8 @@ jobs:
             if curl --fail --silent --show-error --output /dev/null "$package_url" \
               && dotnet tool install --tool-path ./published-tool-smoke Chimpiler --version "$version" --add-source "https://api.nuget.org/v3/index.json" --ignore-failed-sources; then
               ./published-tool-smoke/chimpiler kb --help
+              ./published-tool-smoke/chimpiler dacpac --help
+              ./published-tool-smoke/chimpiler dacpac apply --help
               exit 0
             fi
 
